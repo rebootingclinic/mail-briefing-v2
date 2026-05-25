@@ -25,10 +25,8 @@
       </div>
       <h2 class="detail-title"><%= briefing.subject %></h2>
       <div class="divider"></div>
-      <div class="detail-content">
-        <% briefing.pdf_content.split('\n').forEach(line => { %>
-          <% if (line.trim()) { %><p><%= line %></p><% } %>
-        <% }) %>
+      <div class="detail-content summary-content">
+        <%- briefing.summary_html %>
       </div>
     </div>
   </main>

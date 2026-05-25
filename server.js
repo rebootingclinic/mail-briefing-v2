@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cron = require('node-cron');
+const { marked } = require('marked');
 const { db, initDb } = require('./db');
 const { checkMail } = require('./mail-checker');
 
@@ -29,7 +30,9 @@ app.get('/briefing/:id', async (req, res) => {
     args: [req.params.id],
   });
   if (result.rows.length === 0) return res.status(404).send('브리핑을 찾을 수 없습니다.');
-  res.render('detail', { briefing: result.rows[0] });
+  const briefing = result.rows[0];
+  briefing.summary_html = marked(briefing.pdf_content || '');
+  res.render('detail', { briefing });
 });
 
 // 수동 확인 (즉시 응답 후 백그라운드 처리)

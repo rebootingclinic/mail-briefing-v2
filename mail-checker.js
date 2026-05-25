@@ -2,6 +2,7 @@ require('dotenv').config();
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const pdfParse = require('pdf-parse');
+const Anthropic = require('@anthropic-ai/sdk');
 const { db } = require('./db');
 const { sendTelegram } = require('./telegram');
 
@@ -32,12 +33,46 @@ async function resolveShortUrl(url) {
       redirect: 'follow',
       signal: AbortSignal.timeout(6000),
     });
-    const finalUrl = res.url;
-    const contentType = res.headers.get('content-type') || '';
-    console.log(`[단축URL 결과] ${url.slice(0, 40)} → ${finalUrl.slice(0, 80)} (${contentType.slice(0, 30)})`);
-    return finalUrl;
+    return res.url;
   } catch (e) {
     return null;
+  }
+}
+
+async function summarizePdf(pdfText, subject) {
+  if (!process.env.ANTHROPIC_API_KEY) return pdfText;
+
+  if (!pdfText || pdfText.length < 100) {
+    return '이 PDF는 텍스트 추출이 되지 않는 이미지 기반 파일입니다.';
+  }
+
+  try {
+    const client = new Anthropic();
+    const msg = await client.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 1500,
+      messages: [{
+        role: 'user',
+        content: `다음은 "${subject}" 보고서입니다. 아래 형식으로 한국어 요약을 작성해주세요.
+
+## 핵심 주제
+한 줄로 요약
+
+## 주요 내용
+- 핵심 포인트를 3~5개 불릿으로
+
+## 시사점
+실무적 의미와 활용 방향 2~3문장
+
+---
+보고서 내용:
+${pdfText.slice(0, 8000)}`,
+      }],
+    });
+    return msg.content[0].text;
+  } catch (e) {
+    console.error('[요약 오류]', e.message);
+    return pdfText.slice(0, 3000);
   }
 }
 
@@ -177,6 +212,8 @@ async function checkMail() {
               const data = await pdfParse(pdfBuffer);
               pdfContent = data.text.trim();
               console.log(`[PDF] 추출 완료 — ${safeName} (${pdfContent.length}자)`);
+              pdfContent = await summarizePdf(pdfContent, subject);
+              console.log(`[요약] 완료 — ${subject}`);
             } catch (e) {
               console.error(`[오류] PDF 처리 실패: ${e.message}`);
               pdfContent = '(PDF 텍스트 추출 실패)';
