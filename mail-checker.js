@@ -2,16 +2,19 @@ require('dotenv').config();
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const pdfParse = require('pdf-parse');
-const fs = require('fs');
-const path = require('path');
 const { db } = require('./db');
 const { sendTelegram } = require('./telegram');
 
 const SENDER = 'ch-aide@aidepartners.com';
-const PDF_DIR = path.join(__dirname, 'pdfs');
 const SITE_URL = process.env.SITE_URL || 'https://mail-briefing-v2-production.up.railway.app';
 
-if (!fs.existsSync(PDF_DIR)) fs.mkdirSync(PDF_DIR);
+// 이메일 본문에서 PDF URL 추출
+function extractPdfUrls(html, text) {
+  const pattern = /https:\/\/storage\.googleapis\.com\/[^\s"'<>]+\.pdf/gi;
+  const fromHtml = html.match(pattern) || [];
+  const fromText = text.match(pattern) || [];
+  return [...new Set([...fromHtml, ...fromText])];
+}
 
 async function checkMail() {
   console.log(`[${new Date().toLocaleString('ko-KR')}] 메일 확인 시작...`);
@@ -54,21 +57,33 @@ async function checkMail() {
           : '날짜 미상';
 
         const parsed = await simpleParser(msg.source);
-        const pdfs = (parsed.attachments || []).filter(
-          (a) => a.contentType === 'application/pdf' || a.filename?.toLowerCase().endsWith('.pdf')
-        );
+        const html = parsed.html || parsed.textAsHtml || '';
+        const text = parsed.text || '';
 
-        if (pdfs.length === 0) continue;
+        const pdfUrls = extractPdfUrls(html, text);
 
-        for (const pdf of pdfs) {
-          const safeName = (pdf.filename || `attachment_${uid}.pdf`).replace(/[\\/:*?"<>|]/g, '_');
-          fs.writeFileSync(path.join(PDF_DIR, safeName), pdf.content);
+        if (pdfUrls.length === 0) {
+          console.log(`[스킵] ${subject} — PDF 링크 없음`);
+          continue;
+        }
 
+        for (const pdfUrl of pdfUrls) {
+          // URL에서 파일명 추출
+          const rawName = pdfUrl.split('/').pop();
+          const safeName = decodeURIComponent(rawName).replace(/[\\/:*?"<>|]/g, '_');
+
+          // PDF 다운로드 & 텍스트 추출
           let pdfContent = '';
           try {
-            const data = await pdfParse(pdf.content);
+            const response = await fetch(pdfUrl);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const arrayBuffer = await response.arrayBuffer();
+            const pdfBuffer = Buffer.from(arrayBuffer);
+            const data = await pdfParse(pdfBuffer);
             pdfContent = data.text.trim();
+            console.log(`[PDF] 추출 완료 — ${safeName} (${pdfContent.length}자)`);
           } catch (e) {
+            console.error(`[오류] PDF 처리 실패: ${e.message}`);
             pdfContent = '(PDF 텍스트 추출 실패)';
           }
 
@@ -83,7 +98,7 @@ async function checkMail() {
             ? `${SITE_URL}/briefing/${briefingId}`
             : SITE_URL;
 
-          console.log(`[저장] ${subject} - ${safeName}`);
+          console.log(`[저장] ${subject} — ${safeName}`);
           await sendTelegram(subject, safeName, mailDate, briefingUrl);
           newCount++;
         }
