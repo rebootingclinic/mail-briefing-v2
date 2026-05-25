@@ -30,9 +30,25 @@ async function resolveShortUrl(url) {
     const res = await fetch(url, {
       method: 'GET',
       redirect: 'follow',
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(8000),
     });
-    return res.url;
+    const finalUrl = res.url;
+
+    // me2.do 중간 페이지 → HTML에서 실제 PDF URL 추출
+    if (finalUrl.includes('me2.do') || finalUrl.includes('bridge_url')) {
+      const html = await res.text();
+      // storage.googleapis.com URL 직접 검색
+      const storageMatch = html.match(/https?:\/\/storage\.googleapis\.com\/[^\s"'<>\\]+\.pdf/i);
+      if (storageMatch) {
+        console.log(`[me2.do 해석] → ${storageMatch[0].slice(0, 80)}`);
+        return storageMatch[0];
+      }
+      // href 중 me2.do가 아닌 외부 링크 검색
+      const hrefMatch = html.match(/href=["'](https?:\/\/(?!me2\.do)[^"']+)["']/);
+      if (hrefMatch) return hrefMatch[1];
+    }
+
+    return finalUrl;
   } catch (e) {
     return null;
   }
@@ -94,8 +110,8 @@ async function summarizePdf(pdfBuffer, subject) {
 
     return msg.content[0].text;
   } catch (e) {
-    console.error('[요약 오류]', e.message);
-    return '(요약 생성 중 오류 발생)';
+    console.error('[요약 오류]', e.message, e.status || '');
+    return `(요약 오류: ${e.message})`;
   }
 }
 
