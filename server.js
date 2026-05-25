@@ -32,10 +32,10 @@ app.get('/briefing/:id', async (req, res) => {
   res.render('detail', { briefing: result.rows[0] });
 });
 
-// 수동 확인
-app.post('/check', async (req, res) => {
-  const result = await checkMail();
-  res.redirect('/?checked=1&new=' + result.newCount);
+// 수동 확인 (즉시 응답 후 백그라운드 처리)
+app.post('/check', (req, res) => {
+  res.redirect('/?checked=1');
+  checkMail().catch(err => console.error('[수동확인 오류]', err.message));
 });
 
 // 1시간마다 자동 확인
