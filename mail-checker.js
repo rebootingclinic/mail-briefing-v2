@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
-const Anthropic = require('@anthropic-ai/sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { db } = require('./db');
 const { sendTelegram } = require('./telegram');
 
@@ -97,31 +97,19 @@ async function resolveShortUrl(url) {
   }
 }
 
-// Claude API로 PDF 요약 (이미지 기반 PDF도 처리)
+// Gemini API로 PDF 요약 (텍스트+이미지 모두 인식)
 async function summarizePdf(pdfBuffer, subject) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return '(ANTHROPIC_API_KEY 없음 — 요약 불가)';
+  if (!process.env.GEMINI_API_KEY) {
+    return '(GEMINI_API_KEY 없음 — 요약 불가)';
   }
 
-  const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB
-  const client = new Anthropic();
+  const MAX_INLINE_SIZE = 20 * 1024 * 1024; // Gemini 인라인 최대 20MB
 
   try {
-    let content;
-    if (pdfBuffer.length <= MAX_PDF_SIZE) {
-      // Claude가 PDF 직접 분석 (텍스트+이미지 모두 인식)
-      content = [
-        {
-          type: 'document',
-          source: {
-            type: 'base64',
-            media_type: 'application/pdf',
-            data: pdfBuffer.toString('base64'),
-          },
-        },
-        {
-          type: 'text',
-          text: `이 PDF 보고서("${subject}")를 분석하여 한국어로 정리해주세요.
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+    const prompt = `이 PDF 보고서("${subject}")를 분석하여 한국어로 정리해주세요.
 
 ## 핵심 주제
 한 줄로 핵심 요약
@@ -130,46 +118,33 @@ async function summarizePdf(pdfBuffer, subject) {
 - 핵심 포인트 3~5개 (차트·그래프의 주요 수치도 포함)
 
 ## 시사점
-실무적 의미와 활용 방향 2~3문장`,
-        },
-      ];
+실무적 의미와 활용 방향 2~3문장`;
+
+    let result;
+
+    if (pdfBuffer.length <= MAX_INLINE_SIZE) {
+      // PDF를 base64로 직접 전달 (텍스트+이미지 모두 인식)
+      result = await model.generateContent([
+        { inlineData: { data: pdfBuffer.toString('base64'), mimeType: 'application/pdf' } },
+        prompt,
+      ]);
     } else {
-      // 5MB 초과 대용량 PDF → 텍스트 추출 시도
+      // 20MB 초과 → pdf-parse로 텍스트 추출
       const pdfParse = require('pdf-parse');
       const data = await pdfParse(pdfBuffer);
       const text = data.text.trim();
       if (!text || text.length < 100) {
         return `대용량 PDF(${Math.round(pdfBuffer.length / 1024 / 1024)}MB)이며 텍스트 추출이 불가능합니다. 원문 링크를 통해 직접 확인해주세요.`;
       }
-      content = `이 보고서("${subject}")를 아래 형식으로 한국어 요약해주세요.\n\n## 핵심 주제\n## 주요 내용\n## 시사점\n\n---\n${text.slice(0, 8000)}`;
+      result = await model.generateContent(
+        `이 보고서("${subject}")를 아래 형식으로 한국어 요약해주세요.\n\n## 핵심 주제\n## 주요 내용\n## 시사점\n\n---\n${text.slice(0, 8000)}`
+      );
     }
 
-    const messages = [{ role: 'user', content }];
-
-    // 1차 시도: claude-opus-4-5 (Claude 4 — PDF 네이티브 지원)
-    try {
-      const msg = await client.messages.create({
-        model: 'claude-opus-4-5',
-        max_tokens: 1500,
-        messages,
-      });
-      console.log('[요약] claude-opus-4-5 성공');
-      return msg.content[0].text;
-    } catch (err1) {
-      console.error('[요약] claude-opus-4-5 실패 →', err1.message, `(status: ${err1.status || 'N/A'})`);
-    }
-
-    // 2차 시도: claude-3-5-sonnet-20241022 (PDF 베타 헤더 포함)
-    console.log('[요약] claude-3-5-sonnet-20241022 폴백 시도...');
-    const msg2 = await client.messages.create(
-      { model: 'claude-3-5-sonnet-20241022', max_tokens: 1500, messages },
-      { headers: { 'anthropic-beta': 'pdfs-2024-09-25' } }
-    );
-    console.log('[요약] claude-3-5-sonnet-20241022 폴백 성공');
-    return msg2.content[0].text;
-
+    console.log('[요약] Gemini 성공');
+    return result.response.text();
   } catch (e) {
-    console.error('[요약 최종 오류]', e.message, `(status: ${e.status || 'N/A'})`, e.error ? JSON.stringify(e.error) : '');
+    console.error('[요약 오류]', e.message);
     return `(요약 오류: ${e.message})`;
   }
 }
