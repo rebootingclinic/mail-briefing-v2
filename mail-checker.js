@@ -8,12 +8,35 @@ const { sendTelegram } = require('./telegram');
 const SENDER = 'ch-aide@aidepartners.com';
 const SITE_URL = process.env.SITE_URL || 'https://mail-briefing-v2-production.up.railway.app';
 
-// 이메일 본문에서 Google Storage PDF URL 추출
-function extractPdfUrls(html, text) {
-  const pattern = /https:\/\/storage\.googleapis\.com\/[^\s"'<>]+\.pdf/gi;
-  const fromHtml = html.match(pattern) || [];
-  const fromText = text.match(pattern) || [];
-  return [...new Set([...fromHtml, ...fromText])];
+// 이메일 본문에서 PDF URL 추출
+function extractPdfUrls(html, text, subject) {
+  const urls = new Set();
+
+  // 전략 1: href 속성에서 직접 추출
+  const hrefPattern = /href=["']([^"']+)["']/gi;
+  const allHrefs = [];
+  let match;
+  while ((match = hrefPattern.exec(html)) !== null) {
+    const url = match[1];
+    allHrefs.push(url);
+    if (url.includes('storage.googleapis.com') && url.toLowerCase().includes('.pdf')) {
+      urls.add(url);
+    } else if (url.toLowerCase().endsWith('.pdf')) {
+      urls.add(url);
+    }
+  }
+
+  // 전략 2: 텍스트 본문에서 PDF URL 찾기
+  const textPattern = /https?:\/\/\S+\.pdf/gi;
+  for (const m of (text.match(textPattern) || [])) urls.add(m);
+
+  // 디버그: PDF 못 찾으면 href 목록 출력
+  if (urls.size === 0 && allHrefs.length > 0) {
+    console.log(`[디버그] "${subject}" href ${allHrefs.length}개:`);
+    allHrefs.slice(0, 5).forEach((h, i) => console.log(`  [${i}] ${h.slice(0, 120)}`));
+  }
+
+  return [...urls];
 }
 
 async function checkMail() {
@@ -67,7 +90,7 @@ async function checkMail() {
           const html = parsed.html || parsed.textAsHtml || '';
           const text = parsed.text || '';
 
-          const pdfUrls = extractPdfUrls(html, text);
+          const pdfUrls = extractPdfUrls(html, text, subject);
 
           if (pdfUrls.length === 0) {
             console.log(`[스킵] ${subject} — PDF 링크 없음`);
