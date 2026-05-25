@@ -22,13 +22,28 @@ function decodeStibeeUrl(stibeeUrl) {
 }
 
 const SKIP_DOMAINS = ['facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com', 'youtube.com'];
+// PDF 링크를 감추는 단축 URL 서비스
+const SHORT_URL_DOMAINS = ['me2.do', 'bit.ly', 'han.gl', 'tinyurl.com', 'ow.ly'];
+
+async function resolveShortUrl(url) {
+  try {
+    const res = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(5000),
+    });
+    return res.url;
+  } catch (e) {
+    return null;
+  }
+}
 
 // 이메일 본문에서 PDF URL 추출
 async function extractPdfUrls(html, text, subject) {
   const urls = new Set();
+  const shortUrls = new Set();
 
   const hrefPattern = /href=["']([^"']+)["']/gi;
-  const stibeeTargets = new Set();
   let match;
 
   while ((match = hrefPattern.exec(html)) !== null) {
@@ -45,7 +60,17 @@ async function extractPdfUrls(html, text, subject) {
       const decoded = decodeStibeeUrl(url);
       if (!decoded) continue;
       if (SKIP_DOMAINS.some((d) => decoded.includes(d))) continue;
-      stibeeTargets.add(decoded);
+
+      // 직접 Google Storage PDF
+      if (decoded.includes('storage.googleapis.com') && decoded.toLowerCase().includes('.pdf')) {
+        urls.add(decoded);
+      } else if (decoded.toLowerCase().endsWith('.pdf')) {
+        urls.add(decoded);
+      }
+      // 단축 URL (me2.do 등) → 나중에 추적
+      else if (SHORT_URL_DOMAINS.some((d) => decoded.includes(d))) {
+        shortUrls.add(decoded);
+      }
     }
   }
 
@@ -53,19 +78,21 @@ async function extractPdfUrls(html, text, subject) {
   const textPattern = /https?:\/\/\S+\.pdf/gi;
   for (const m of (text.match(textPattern) || [])) urls.add(m);
 
-  // 디코딩된 Stibee URL 처리 (리디렉트 없이 빠르게)
-  for (const target of stibeeTargets) {
-    if (target.includes('storage.googleapis.com') && target.toLowerCase().includes('.pdf')) {
-      urls.add(target);
-    } else if (target.toLowerCase().endsWith('.pdf')) {
-      urls.add(target);
+  // 단축 URL 병렬 리디렉트 추적
+  if (urls.size === 0 && shortUrls.size > 0) {
+    const uniqueShort = [...shortUrls];
+    console.log(`[단축URL] "${subject}" — ${uniqueShort.length}개 병렬 확인 중`);
+    const resolved = await Promise.all(uniqueShort.map(resolveShortUrl));
+    for (const finalUrl of resolved) {
+      if (!finalUrl) continue;
+      if (finalUrl.toLowerCase().endsWith('.pdf') || finalUrl.includes('storage.googleapis.com')) {
+        urls.add(finalUrl);
+      }
     }
   }
 
-  // 직접 찾기 실패 → 디코딩 결과 로그 출력 후 단축 URL 1개만 추적
-  if (urls.size === 0 && stibeeTargets.size > 0) {
-    console.log(`[디버그] "${subject}" 디코딩 결과 ${stibeeTargets.size}개:`);
-    [...stibeeTargets].slice(0, 8).forEach((u, i) => console.log(`  [${i}] ${u.slice(0, 120)}`));
+  if (urls.size === 0) {
+    console.log(`[스킵] "${subject}" — PDF 링크 없음`);
   }
 
   return [...urls];
@@ -124,10 +151,7 @@ async function checkMail() {
 
           const pdfUrls = await extractPdfUrls(html, text, subject);
 
-          if (pdfUrls.length === 0) {
-            console.log(`[스킵] ${subject} — PDF 링크 없음`);
-            continue;
-          }
+          if (pdfUrls.length === 0) continue;
 
           for (const pdfUrl of pdfUrls) {
             const rawName = pdfUrl.split('/').pop();
