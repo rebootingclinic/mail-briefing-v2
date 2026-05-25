@@ -22,7 +22,9 @@
       <div class="detail-meta">
         <span class="badge">📅 <%= briefing.mail_date %></span>
         <span class="badge">📄 <%= briefing.pdf_filename %></span>
-        <% if (briefing.pdf_url) { %>
+        <% if (briefing.pdf_viewer_url) { %>
+          <a href="<%= briefing.pdf_viewer_url %>" target="_blank" class="badge badge-link">🔗 원문 보기</a>
+        <% } else if (briefing.pdf_url) { %>
           <a href="<%= briefing.pdf_url %>" target="_blank" class="badge badge-link">🔗 원문 보기</a>
         <% } %>
       </div>

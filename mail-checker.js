@@ -61,10 +61,9 @@ async function summarizePdf(pdfBuffer, subject) {
   }
 
   const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB
+  const client = new Anthropic();
 
   try {
-    const client = new Anthropic();
-
     let content;
     if (pdfBuffer.length <= MAX_PDF_SIZE) {
       // Claude가 PDF 직접 분석 (텍스트+이미지 모두 인식)
@@ -102,15 +101,32 @@ async function summarizePdf(pdfBuffer, subject) {
       content = `이 보고서("${subject}")를 아래 형식으로 한국어 요약해주세요.\n\n## 핵심 주제\n## 주요 내용\n## 시사점\n\n---\n${text.slice(0, 8000)}`;
     }
 
-    const msg = await client.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 1500,
-      messages: [{ role: 'user', content }],
-    });
+    const messages = [{ role: 'user', content }];
 
-    return msg.content[0].text;
+    // 1차 시도: claude-opus-4-5 (Claude 4 — PDF 네이티브 지원)
+    try {
+      const msg = await client.messages.create({
+        model: 'claude-opus-4-5',
+        max_tokens: 1500,
+        messages,
+      });
+      console.log('[요약] claude-opus-4-5 성공');
+      return msg.content[0].text;
+    } catch (err1) {
+      console.error('[요약] claude-opus-4-5 실패 →', err1.message, `(status: ${err1.status || 'N/A'})`);
+    }
+
+    // 2차 시도: claude-3-5-sonnet-20241022 (PDF 베타 헤더 포함)
+    console.log('[요약] claude-3-5-sonnet-20241022 폴백 시도...');
+    const msg2 = await client.messages.create(
+      { model: 'claude-3-5-sonnet-20241022', max_tokens: 1500, messages },
+      { headers: { 'anthropic-beta': 'pdfs-2024-09-25' } }
+    );
+    console.log('[요약] claude-3-5-sonnet-20241022 폴백 성공');
+    return msg2.content[0].text;
+
   } catch (e) {
-    console.error('[요약 오류]', e.message, e.status || '');
+    console.error('[요약 최종 오류]', e.message, `(status: ${e.status || 'N/A'})`, e.error ? JSON.stringify(e.error) : '');
     return `(요약 오류: ${e.message})`;
   }
 }

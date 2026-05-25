@@ -58,6 +58,10 @@ app.get('/briefing/:id', async (req, res) => {
   if (result.rows.length === 0) return res.status(404).send('브리핑을 찾을 수 없습니다.');
   const briefing = result.rows[0];
   briefing.summary_html = mdToHtml(briefing.pdf_content || '');
+  // Google Docs Viewer로 열면 브라우저에서 바로 PDF 표시 (다운로드 없이)
+  briefing.pdf_viewer_url = briefing.pdf_url
+    ? `https://docs.google.com/viewer?url=${encodeURIComponent(briefing.pdf_url)}`
+    : null;
   res.render('detail', { briefing });
 });
 
