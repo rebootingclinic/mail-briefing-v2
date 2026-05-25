@@ -8,32 +8,78 @@ const { sendTelegram } = require('./telegram');
 const SENDER = 'ch-aide@aidepartners.com';
 const SITE_URL = process.env.SITE_URL || 'https://mail-briefing-v2-production.up.railway.app';
 
+// Stibee 트래킹 URL에서 실제 URL 추출 (Base64 디코딩)
+function decodeStibeeUrl(stibeeUrl) {
+  try {
+    const lastSlash = stibeeUrl.lastIndexOf('/');
+    if (lastSlash === -1) return null;
+    const base64Part = stibeeUrl.slice(lastSlash + 1);
+    const decoded = Buffer.from(base64Part, 'base64').toString('utf-8');
+    return decoded.startsWith('http') ? decoded : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+const SKIP_DOMAINS = ['facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com', 'youtube.com'];
+
 // 이메일 본문에서 PDF URL 추출
-function extractPdfUrls(html, text, subject) {
+async function extractPdfUrls(html, text, subject) {
   const urls = new Set();
 
-  // 전략 1: href 속성에서 직접 추출
   const hrefPattern = /href=["']([^"']+)["']/gi;
-  const allHrefs = [];
+  const stibeeTargets = new Set();
   let match;
+
   while ((match = hrefPattern.exec(html)) !== null) {
     const url = match[1];
-    allHrefs.push(url);
-    if (url.includes('storage.googleapis.com') && url.toLowerCase().includes('.pdf')) {
+
+    // 직접 .pdf 링크
+    if (url.toLowerCase().endsWith('.pdf') || url.includes('storage.googleapis.com')) {
       urls.add(url);
-    } else if (url.toLowerCase().endsWith('.pdf')) {
-      urls.add(url);
+      continue;
+    }
+
+    // Stibee 트래킹 URL → Base64 디코딩
+    if (url.includes('event.stibee.com/v2/click/')) {
+      const decoded = decodeStibeeUrl(url);
+      if (!decoded) continue;
+      if (SKIP_DOMAINS.some((d) => decoded.includes(d))) continue;
+      stibeeTargets.add(decoded);
     }
   }
 
-  // 전략 2: 텍스트 본문에서 PDF URL 찾기
+  // 텍스트에서 직접 PDF URL 찾기
   const textPattern = /https?:\/\/\S+\.pdf/gi;
   for (const m of (text.match(textPattern) || [])) urls.add(m);
 
-  // 디버그: PDF 못 찾으면 href 목록 출력
-  if (urls.size === 0 && allHrefs.length > 0) {
-    console.log(`[디버그] "${subject}" href ${allHrefs.length}개:`);
-    allHrefs.slice(0, 5).forEach((h, i) => console.log(`  [${i}] ${h.slice(0, 120)}`));
+  // 디코딩된 Stibee URL 처리
+  for (const target of stibeeTargets) {
+    // 직접 Google Storage PDF
+    if (target.includes('storage.googleapis.com') && target.toLowerCase().includes('.pdf')) {
+      urls.add(target);
+      continue;
+    }
+    if (target.toLowerCase().endsWith('.pdf')) {
+      urls.add(target);
+      continue;
+    }
+
+    // 단축 URL(stib.ee 등) → 리디렉트 따라가서 최종 URL 확인
+    try {
+      const res = await fetch(target, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(5000) });
+      const finalUrl = res.url;
+      if (finalUrl.toLowerCase().endsWith('.pdf') || finalUrl.includes('storage.googleapis.com')) {
+        urls.add(finalUrl);
+      }
+    } catch (e) {
+      // 타임아웃 또는 오류 — 스킵
+    }
+  }
+
+  if (urls.size === 0) {
+    console.log(`[디버그] "${subject}" 디코딩 결과 ${stibeeTargets.size}개:`);
+    [...stibeeTargets].slice(0, 5).forEach((u, i) => console.log(`  [${i}] ${u.slice(0, 100)}`));
   }
 
   return [...urls];
@@ -90,7 +136,7 @@ async function checkMail() {
           const html = parsed.html || parsed.textAsHtml || '';
           const text = parsed.text || '';
 
-          const pdfUrls = extractPdfUrls(html, text, subject);
+          const pdfUrls = await extractPdfUrls(html, text, subject);
 
           if (pdfUrls.length === 0) {
             console.log(`[스킵] ${subject} — PDF 링크 없음`);
