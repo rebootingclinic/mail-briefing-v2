@@ -28,11 +28,14 @@ const SHORT_URL_DOMAINS = ['me2.do', 'bit.ly', 'han.gl', 'tinyurl.com', 'ow.ly']
 async function resolveShortUrl(url) {
   try {
     const res = await fetch(url, {
-      method: 'HEAD',
+      method: 'GET',
       redirect: 'follow',
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(6000),
     });
-    return res.url;
+    const finalUrl = res.url;
+    const contentType = res.headers.get('content-type') || '';
+    console.log(`[단축URL 결과] ${url.slice(0, 40)} → ${finalUrl.slice(0, 80)} (${contentType.slice(0, 30)})`);
+    return finalUrl;
   } catch (e) {
     return null;
   }
@@ -98,7 +101,14 @@ async function extractPdfUrls(html, text, subject) {
   return [...urls];
 }
 
+let isChecking = false;
+
 async function checkMail() {
+  if (isChecking) {
+    console.log('[스킵] 이미 메일 확인 중...');
+    return { newCount: 0 };
+  }
+  isChecking = true;
   console.log(`[${new Date().toLocaleString('ko-KR')}] 메일 확인 시작...`);
 
   const client = new ImapFlow({
@@ -196,6 +206,8 @@ async function checkMail() {
     await client.logout();
   } catch (err) {
     console.error('[오류]', err.message);
+  } finally {
+    isChecking = false;
   }
 
   console.log(`[완료] 새 브리핑 ${newCount}건`);
