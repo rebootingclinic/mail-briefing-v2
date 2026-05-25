@@ -1,9 +1,35 @@
 require('dotenv').config();
 const express = require('express');
 const cron = require('node-cron');
-const { marked } = require('marked');
 const { db, initDb } = require('./db');
 const { checkMail } = require('./mail-checker');
+
+// 간단한 마크다운 → HTML 변환
+function mdToHtml(text) {
+  if (!text) return '';
+  const lines = text.split('\n');
+  const result = [];
+  let inList = false;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (/^## (.+)/.test(line)) {
+      if (inList) { result.push('</ul>'); inList = false; }
+      result.push(`<h2>${line.replace(/^## /, '')}</h2>`);
+    } else if (/^- (.+)/.test(line) || /^\* (.+)/.test(line)) {
+      if (!inList) { result.push('<ul>'); inList = true; }
+      result.push(`<li>${line.replace(/^[-*] /, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`);
+    } else if (/^---+$/.test(line)) {
+      if (inList) { result.push('</ul>'); inList = false; }
+      result.push('<hr>');
+    } else if (line.trim()) {
+      if (inList) { result.push('</ul>'); inList = false; }
+      result.push(`<p>${line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`);
+    }
+  }
+  if (inList) result.push('</ul>');
+  return result.join('\n');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,7 +57,7 @@ app.get('/briefing/:id', async (req, res) => {
   });
   if (result.rows.length === 0) return res.status(404).send('브리핑을 찾을 수 없습니다.');
   const briefing = result.rows[0];
-  briefing.summary_html = marked(briefing.pdf_content || '');
+  briefing.summary_html = mdToHtml(briefing.pdf_content || '');
   res.render('detail', { briefing });
 });
 
