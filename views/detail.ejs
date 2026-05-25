@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= briefing.subject %> | CH-AIDE 브리핑</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div>
+        <h1>📋 CH-AIDE 브리핑</h1>
+        <p class="subtitle">ch-aide@aidepartners.com 수신 PDF 자동 브리핑</p>
+      </div>
+      <a href="/" class="btn-check">← 목록으로</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="detail-card">
+      <div class="detail-meta">
+        <span class="badge">📅 <%= briefing.mail_date %></span>
+        <span class="badge">📄 <%= briefing.pdf_filename %></span>
+      </div>
+      <h2 class="detail-title"><%= briefing.subject %></h2>
+      <div class="divider"></div>
+      <div class="detail-content">
+        <% briefing.pdf_content.split('\n').forEach(line => { %>
+          <% if (line.trim()) { %><p><%= line %></p><% } %>
+        <% }) %>
+      </div>
+    </div>
+  </main>
+
+  <footer><p>1시간마다 자동 확인 · 새 브리핑 도착 시 텔레그램 알림</p></footer>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CH-AIDE 브리핑</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div>
+        <h1>📋 CH-AIDE 브리핑</h1>
+        <p class="subtitle">ch-aide@aidepartners.com 수신 PDF 자동 브리핑</p>
+      </div>
+      <form method="POST" action="/check">
+        <button type="submit" class="btn-check">🔄 지금 확인</button>
+      </form>
+    </div>
+  </header>
+
+  <main>
+    <% if (query.checked) { %>
+      <div class="toast">
+        <% if (parseInt(query.new) > 0) { %>
+          ✅ 새 브리핑 <strong><%= query.new %>건</strong> 추가됐어요!
+        <% } else { %>
+          ✅ 확인 완료 — 새 메일이 없어요.
+        <% } %>
+      </div>
+    <% } %>
+
+    <% if (briefings.length === 0) { %>
+      <div class="empty">
+        <p>📭 아직 브리핑이 없어요.</p>
+        <p>ch-aide@aidepartners.com 에서 PDF 메일이 오면 자동으로 표시됩니다.</p>
+      </div>
+    <% } else { %>
+      <div class="grid">
+        <% briefings.forEach(b => { %>
+          <a href="/briefing/<%= b.id %>" class="card">
+            <div class="card-date"><%= b.mail_date %></div>
+            <h2 class="card-title"><%= b.subject %></h2>
+            <div class="card-file">📄 <%= b.pdf_filename %></div>
+            <p class="card-preview"><%= b.preview %>...</p>
+            <span class="card-link">자세히 보기 →</span>
+          </a>
+        <% }) %>
+      </div>
+    <% } %>
+  </main>
+
+  <footer><p>1시간마다 자동 확인 · 새 브리핑 도착 시 텔레그램 알림</p></footer>
+</body>
+</html>
