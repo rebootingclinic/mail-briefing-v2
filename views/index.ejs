@@ -21,13 +21,16 @@
 
   <main>
     <% if (query.checked) { %>
-      <div class="toast">
-        <% if (parseInt(query.new) > 0) { %>
-          ✅ 새 브리핑 <strong><%= query.new %>건</strong> 추가됐어요!
-        <% } else { %>
-          ✅ 확인 완료 — 새 메일이 없어요.
-        <% } %>
-      </div>
+      <% if (briefings.length === 0) { %>
+        <div class="toast toast-processing">
+          🔄 메일 확인 중이에요. 처리가 완료되면 자동으로 새로고침돼요...
+        </div>
+        <meta http-equiv="refresh" content="15">
+      <% } else { %>
+        <div class="toast">
+          ✅ 확인 완료 — 브리핑 목록이 업데이트됐어요.
+        </div>
+      <% } %>
     <% } %>
 
     <% if (briefings.length === 0) { %>

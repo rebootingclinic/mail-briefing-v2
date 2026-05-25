@@ -12,6 +12,7 @@ header h1 { font-size: 1.5rem; font-weight: 700; }
 main { flex: 1; max-width: 900px; width: 100%; margin: 32px auto; padding: 0 20px; }
 
 .toast { background: #e8f5e9; border-left: 4px solid #43a047; padding: 14px 20px; border-radius: 8px; margin-bottom: 24px; font-size: .95rem; color: #2e7d32; }
+.toast-processing { background: #fff8e1; border-left-color: #f9a825; color: #795548; }
 
 .empty { text-align: center; padding: 80px 20px; color: #888; }
 .empty p { margin: 8px 0; font-size: 1.1rem; }
