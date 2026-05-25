@@ -8,7 +8,7 @@ const { sendTelegram } = require('./telegram');
 const SENDER = 'ch-aide@aidepartners.com';
 const SITE_URL = process.env.SITE_URL || 'https://mail-briefing-v2-production.up.railway.app';
 
-// 이메일 본문에서 PDF URL 추출
+// 이메일 본문에서 Google Storage PDF URL 추출
 function extractPdfUrls(html, text) {
   const pattern = /https:\/\/storage\.googleapis\.com\/[^\s"'<>]+\.pdf/gi;
   const fromHtml = html.match(pattern) || [];
@@ -37,70 +37,77 @@ async function checkMail() {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      const messages = client.fetch(
-        { from: SENDER },
-        { uid: true, envelope: true, source: true }
-      );
+      // 발신자로 UID 검색
+      const uids = await client.search({ from: SENDER }, { uid: true });
+      console.log(`[검색] ${SENDER} 메일 ${uids.length}건 발견`);
 
-      for await (const msg of messages) {
-        const uid = String(msg.uid);
+      if (uids.length > 0) {
+        const messages = client.fetch(
+          uids,
+          { uid: true, envelope: true, source: true },
+          { uid: true }
+        );
 
-        const existing = await db.execute({
-          sql: 'SELECT id FROM briefings WHERE uid = ?',
-          args: [uid],
-        });
-        if (existing.rows.length > 0) continue;
+        for await (const msg of messages) {
+          const uid = String(msg.uid);
 
-        const subject = msg.envelope?.subject || '(제목 없음)';
-        const mailDate = msg.envelope?.date
-          ? new Date(msg.envelope.date).toLocaleString('ko-KR')
-          : '날짜 미상';
+          // 이미 처리한 메일이면 스킵
+          const existing = await db.execute({
+            sql: 'SELECT id FROM briefings WHERE uid = ?',
+            args: [uid],
+          });
+          if (existing.rows.length > 0) continue;
 
-        const parsed = await simpleParser(msg.source);
-        const html = parsed.html || parsed.textAsHtml || '';
-        const text = parsed.text || '';
+          const subject = msg.envelope?.subject || '(제목 없음)';
+          const mailDate = msg.envelope?.date
+            ? new Date(msg.envelope.date).toLocaleString('ko-KR')
+            : '날짜 미상';
 
-        const pdfUrls = extractPdfUrls(html, text);
+          const parsed = await simpleParser(msg.source);
+          const html = parsed.html || parsed.textAsHtml || '';
+          const text = parsed.text || '';
 
-        if (pdfUrls.length === 0) {
-          console.log(`[스킵] ${subject} — PDF 링크 없음`);
-          continue;
-        }
+          const pdfUrls = extractPdfUrls(html, text);
 
-        for (const pdfUrl of pdfUrls) {
-          // URL에서 파일명 추출
-          const rawName = pdfUrl.split('/').pop();
-          const safeName = decodeURIComponent(rawName).replace(/[\\/:*?"<>|]/g, '_');
-
-          // PDF 다운로드 & 텍스트 추출
-          let pdfContent = '';
-          try {
-            const response = await fetch(pdfUrl);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const arrayBuffer = await response.arrayBuffer();
-            const pdfBuffer = Buffer.from(arrayBuffer);
-            const data = await pdfParse(pdfBuffer);
-            pdfContent = data.text.trim();
-            console.log(`[PDF] 추출 완료 — ${safeName} (${pdfContent.length}자)`);
-          } catch (e) {
-            console.error(`[오류] PDF 처리 실패: ${e.message}`);
-            pdfContent = '(PDF 텍스트 추출 실패)';
+          if (pdfUrls.length === 0) {
+            console.log(`[스킵] ${subject} — PDF 링크 없음`);
+            continue;
           }
 
-          const result = await db.execute({
-            sql: `INSERT OR IGNORE INTO briefings (uid, subject, sender, mail_date, pdf_filename, pdf_content)
-                  VALUES (?, ?, ?, ?, ?, ?)`,
-            args: [uid, subject, SENDER, mailDate, safeName, pdfContent],
-          });
+          for (const pdfUrl of pdfUrls) {
+            const rawName = pdfUrl.split('/').pop();
+            const safeName = decodeURIComponent(rawName).replace(/[\\/:*?"<>|]/g, '_');
 
-          const briefingId = result.lastInsertRowid;
-          const briefingUrl = briefingId
-            ? `${SITE_URL}/briefing/${briefingId}`
-            : SITE_URL;
+            // PDF 다운로드 & 텍스트 추출
+            let pdfContent = '';
+            try {
+              const response = await fetch(pdfUrl);
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              const arrayBuffer = await response.arrayBuffer();
+              const pdfBuffer = Buffer.from(arrayBuffer);
+              const data = await pdfParse(pdfBuffer);
+              pdfContent = data.text.trim();
+              console.log(`[PDF] 추출 완료 — ${safeName} (${pdfContent.length}자)`);
+            } catch (e) {
+              console.error(`[오류] PDF 처리 실패: ${e.message}`);
+              pdfContent = '(PDF 텍스트 추출 실패)';
+            }
 
-          console.log(`[저장] ${subject} — ${safeName}`);
-          await sendTelegram(subject, safeName, mailDate, briefingUrl);
-          newCount++;
+            const result = await db.execute({
+              sql: `INSERT OR IGNORE INTO briefings (uid, subject, sender, mail_date, pdf_filename, pdf_content)
+                    VALUES (?, ?, ?, ?, ?, ?)`,
+              args: [uid, subject, SENDER, mailDate, safeName, pdfContent],
+            });
+
+            const briefingId = result.lastInsertRowid;
+            const briefingUrl = briefingId
+              ? `${SITE_URL}/briefing/${briefingId}`
+              : SITE_URL;
+
+            console.log(`[저장] ${subject} — ${safeName}`);
+            await sendTelegram(subject, safeName, mailDate, briefingUrl);
+            newCount++;
+          }
         }
       }
     } finally {
