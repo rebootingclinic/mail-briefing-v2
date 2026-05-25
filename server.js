@@ -76,6 +76,5 @@ cron.schedule('0 * * * *', async () => {
 initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`✅ 서버 실행: http://localhost:${PORT}`);
-    checkMail();
   });
 });
