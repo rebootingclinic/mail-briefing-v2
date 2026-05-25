@@ -85,19 +85,13 @@ async function resolveShortUrl(url) {
   }
 }
 
-// Gemini API로 PDF 요약 (텍스트+이미지 모두 인식)
+// Gemini REST API로 PDF 요약 (SDK 없이 직접 호출)
 async function summarizePdf(pdfBuffer, subject) {
   if (!process.env.GEMINI_API_KEY) {
     return '(GEMINI_API_KEY 없음 — 요약 불가)';
   }
 
-  const MAX_INLINE_SIZE = 20 * 1024 * 1024; // Gemini 인라인 최대 20MB
-
-  try {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-    const prompt = `이 PDF 보고서("${subject}")를 분석하여 한국어로 정리해주세요.
+  const prompt = `이 PDF 보고서("${subject}")를 분석하여 한국어로 정리해주세요.
 
 ## 핵심 주제
 한 줄로 핵심 요약
@@ -108,33 +102,58 @@ async function summarizePdf(pdfBuffer, subject) {
 ## 시사점
 실무적 의미와 활용 방향 2~3문장`;
 
-    let result;
+  // 시도할 모델 목록 (순서대로 시도)
+  const candidates = [
+    { version: 'v1beta', model: 'gemini-2.0-flash' },
+    { version: 'v1beta', model: 'gemini-1.5-flash' },
+    { version: 'v1',     model: 'gemini-1.5-flash' },
+    { version: 'v1beta', model: 'gemini-1.5-pro' },
+  ];
 
-    if (pdfBuffer.length <= MAX_INLINE_SIZE) {
-      // PDF를 base64로 직접 전달 (텍스트+이미지 모두 인식)
-      result = await model.generateContent([
-        { inlineData: { data: pdfBuffer.toString('base64'), mimeType: 'application/pdf' } },
-        prompt,
-      ]);
-    } else {
-      // 20MB 초과 → pdf-parse로 텍스트 추출
-      const pdfParse = require('pdf-parse');
-      const data = await pdfParse(pdfBuffer);
-      const text = data.text.trim();
-      if (!text || text.length < 100) {
-        return `대용량 PDF(${Math.round(pdfBuffer.length / 1024 / 1024)}MB)이며 텍스트 추출이 불가능합니다. 원문 링크를 통해 직접 확인해주세요.`;
-      }
-      result = await model.generateContent(
-        `이 보고서("${subject}")를 아래 형식으로 한국어 요약해주세요.\n\n## 핵심 주제\n## 주요 내용\n## 시사점\n\n---\n${text.slice(0, 8000)}`
-      );
+  let parts;
+  if (pdfBuffer.length <= 20 * 1024 * 1024) {
+    parts = [
+      { inline_data: { mime_type: 'application/pdf', data: pdfBuffer.toString('base64') } },
+      { text: prompt },
+    ];
+  } else {
+    const pdfParse = require('pdf-parse');
+    const data = await pdfParse(pdfBuffer);
+    const text = data.text.trim();
+    if (!text || text.length < 100) {
+      return `대용량 PDF이며 텍스트 추출이 불가능합니다. 원문 링크를 통해 직접 확인해주세요.`;
     }
-
-    console.log('[요약] Gemini 성공');
-    return result.response.text();
-  } catch (e) {
-    console.error('[요약 오류]', e.message);
-    return `(요약 오류: ${e.message})`;
+    parts = [{ text: `이 보고서("${subject}")를 요약해주세요.\n\n## 핵심 주제\n## 주요 내용\n## 시사점\n\n---\n${text.slice(0, 8000)}` }];
   }
+
+  const body = JSON.stringify({ contents: [{ parts }] });
+
+  for (const { version, model } of candidates) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(90000),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        console.error(`[요약] ${model}(${version}) 실패: ${res.status} ${JSON.stringify(json).slice(0, 150)}`);
+        continue;
+      }
+      const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) {
+        console.log(`[요약] ${model}(${version}) 성공`);
+        return text;
+      }
+      console.error(`[요약] ${model}(${version}) 응답 없음:`, JSON.stringify(json).slice(0, 150));
+    } catch (e) {
+      console.error(`[요약] ${model}(${version}) 오류:`, e.message);
+    }
+  }
+
+  return '(요약 오류: 모든 Gemini 모델 실패 — Railway 로그 확인)';
 }
 
 // 이메일 본문에서 PDF URL 추출
@@ -177,9 +196,24 @@ async function extractPdfUrls(html, text, subject) {
     const uniqueShort = [...shortUrls];
     console.log(`[단축URL] "${subject}" — ${uniqueShort.length}개 병렬 확인 중`);
     const resolved = await Promise.all(uniqueShort.map(resolveShortUrl));
-    for (const finalUrl of resolved) {
+    for (let finalUrl of resolved) {
       if (!finalUrl) continue;
-      if (finalUrl.toLowerCase().endsWith('.pdf') || finalUrl.includes('storage.googleapis.com')) {
+
+      // me2.do bridge URL이 그대로 반환된 경우 → url= 파라미터에서 실제 URL 추출
+      if (finalUrl.includes('me2.do') || finalUrl.includes('bridge_url')) {
+        try {
+          const bridgeObj = new URL(finalUrl);
+          const extracted = bridgeObj.searchParams.get('url') || bridgeObj.searchParams.get('URL');
+          if (extracted && extracted.startsWith('http')) {
+            console.log(`[bridge 추출] ${extracted.slice(0, 80)}`);
+            finalUrl = extracted;
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      // me2.do URL이 아닌 경우만 추가
+      if (!finalUrl.includes('me2.do') &&
+          (finalUrl.toLowerCase().endsWith('.pdf') || finalUrl.includes('storage.googleapis.com'))) {
         urls.add(finalUrl);
       }
     }
