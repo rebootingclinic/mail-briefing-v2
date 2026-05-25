@@ -53,33 +53,19 @@ async function extractPdfUrls(html, text, subject) {
   const textPattern = /https?:\/\/\S+\.pdf/gi;
   for (const m of (text.match(textPattern) || [])) urls.add(m);
 
-  // 디코딩된 Stibee URL 처리
+  // 디코딩된 Stibee URL 처리 (리디렉트 없이 빠르게)
   for (const target of stibeeTargets) {
-    // 직접 Google Storage PDF
     if (target.includes('storage.googleapis.com') && target.toLowerCase().includes('.pdf')) {
       urls.add(target);
-      continue;
-    }
-    if (target.toLowerCase().endsWith('.pdf')) {
+    } else if (target.toLowerCase().endsWith('.pdf')) {
       urls.add(target);
-      continue;
-    }
-
-    // 단축 URL(stib.ee 등) → 리디렉트 따라가서 최종 URL 확인
-    try {
-      const res = await fetch(target, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(5000) });
-      const finalUrl = res.url;
-      if (finalUrl.toLowerCase().endsWith('.pdf') || finalUrl.includes('storage.googleapis.com')) {
-        urls.add(finalUrl);
-      }
-    } catch (e) {
-      // 타임아웃 또는 오류 — 스킵
     }
   }
 
-  if (urls.size === 0) {
+  // 직접 찾기 실패 → 디코딩 결과 로그 출력 후 단축 URL 1개만 추적
+  if (urls.size === 0 && stibeeTargets.size > 0) {
     console.log(`[디버그] "${subject}" 디코딩 결과 ${stibeeTargets.size}개:`);
-    [...stibeeTargets].slice(0, 5).forEach((u, i) => console.log(`  [${i}] ${u.slice(0, 100)}`));
+    [...stibeeTargets].slice(0, 8).forEach((u, i) => console.log(`  [${i}] ${u.slice(0, 120)}`));
   }
 
   return [...urls];
