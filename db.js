@@ -3,6 +3,7 @@ const path = require('path');
 
 const db = createClient({
   url: process.env.DATABASE_URL || `file:${path.join(__dirname, 'briefings.db')}`,
+  authToken: process.env.LIBSQL_AUTH_TOKEN,
 });
 
 async function initDb() {
