@@ -1,15 +1,15 @@
 require('dotenv').config();
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
-const pdfParse = require('pdf-parse');
 const Anthropic = require('@anthropic-ai/sdk');
 const { db } = require('./db');
 const { sendTelegram } = require('./telegram');
 
 const SENDER = 'ch-aide@aidepartners.com';
 const SITE_URL = process.env.SITE_URL || 'https://mail-briefing-v2-production.up.railway.app';
+const MAIL_LIMIT = parseInt(process.env.MAIL_LIMIT) || 0; // 0 = 무제한
 
-// Stibee 트래킹 URL에서 실제 URL 추출 (Base64 디코딩)
+// Stibee 트래킹 URL → Base64 디코딩
 function decodeStibeeUrl(stibeeUrl) {
   try {
     const lastSlash = stibeeUrl.lastIndexOf('/');
@@ -23,7 +23,6 @@ function decodeStibeeUrl(stibeeUrl) {
 }
 
 const SKIP_DOMAINS = ['facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com', 'youtube.com'];
-// PDF 링크를 감추는 단축 URL 서비스
 const SHORT_URL_DOMAINS = ['me2.do', 'bit.ly', 'han.gl', 'tinyurl.com', 'ow.ly'];
 
 async function resolveShortUrl(url) {
@@ -39,40 +38,64 @@ async function resolveShortUrl(url) {
   }
 }
 
-async function summarizePdf(pdfText, subject) {
-  if (!process.env.ANTHROPIC_API_KEY) return pdfText;
-
-  if (!pdfText || pdfText.length < 100) {
-    return '이 PDF는 텍스트 추출이 되지 않는 이미지 기반 파일입니다.';
+// Claude API로 PDF 요약 (이미지 기반 PDF도 처리)
+async function summarizePdf(pdfBuffer, subject) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return '(ANTHROPIC_API_KEY 없음 — 요약 불가)';
   }
+
+  const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB
 
   try {
     const client = new Anthropic();
+
+    let content;
+    if (pdfBuffer.length <= MAX_PDF_SIZE) {
+      // Claude가 PDF 직접 분석 (텍스트+이미지 모두 인식)
+      content = [
+        {
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: 'application/pdf',
+            data: pdfBuffer.toString('base64'),
+          },
+        },
+        {
+          type: 'text',
+          text: `이 PDF 보고서("${subject}")를 분석하여 한국어로 정리해주세요.
+
+## 핵심 주제
+한 줄로 핵심 요약
+
+## 주요 내용
+- 핵심 포인트 3~5개 (차트·그래프의 주요 수치도 포함)
+
+## 시사점
+실무적 의미와 활용 방향 2~3문장`,
+        },
+      ];
+    } else {
+      // 5MB 초과 대용량 PDF → 텍스트 추출 시도
+      const pdfParse = require('pdf-parse');
+      const data = await pdfParse(pdfBuffer);
+      const text = data.text.trim();
+      if (!text || text.length < 100) {
+        return `대용량 PDF(${Math.round(pdfBuffer.length / 1024 / 1024)}MB)이며 텍스트 추출이 불가능합니다. 원문 링크를 통해 직접 확인해주세요.`;
+      }
+      content = `이 보고서("${subject}")를 아래 형식으로 한국어 요약해주세요.\n\n## 핵심 주제\n## 주요 내용\n## 시사점\n\n---\n${text.slice(0, 8000)}`;
+    }
+
     const msg = await client.messages.create({
       model: 'claude-opus-4-5',
       max_tokens: 1500,
-      messages: [{
-        role: 'user',
-        content: `다음은 "${subject}" 보고서입니다. 아래 형식으로 한국어 요약을 작성해주세요.
-
-## 핵심 주제
-한 줄로 요약
-
-## 주요 내용
-- 핵심 포인트를 3~5개 불릿으로
-
-## 시사점
-실무적 의미와 활용 방향 2~3문장
-
----
-보고서 내용:
-${pdfText.slice(0, 8000)}`,
-      }],
+      messages: [{ role: 'user', content }],
     });
+
     return msg.content[0].text;
   } catch (e) {
     console.error('[요약 오류]', e.message);
-    return pdfText.slice(0, 3000);
+    return '(요약 생성 중 오류 발생)';
   }
 }
 
@@ -87,26 +110,21 @@ async function extractPdfUrls(html, text, subject) {
   while ((match = hrefPattern.exec(html)) !== null) {
     const url = match[1];
 
-    // 직접 .pdf 링크
     if (url.toLowerCase().endsWith('.pdf') || url.includes('storage.googleapis.com')) {
       urls.add(url);
       continue;
     }
 
-    // Stibee 트래킹 URL → Base64 디코딩
     if (url.includes('event.stibee.com/v2/click/')) {
       const decoded = decodeStibeeUrl(url);
       if (!decoded) continue;
       if (SKIP_DOMAINS.some((d) => decoded.includes(d))) continue;
 
-      // 직접 Google Storage PDF
       if (decoded.includes('storage.googleapis.com') && decoded.toLowerCase().includes('.pdf')) {
         urls.add(decoded);
       } else if (decoded.toLowerCase().endsWith('.pdf')) {
         urls.add(decoded);
-      }
-      // 단축 URL (me2.do 등) → 나중에 추적
-      else if (SHORT_URL_DOMAINS.some((d) => decoded.includes(d))) {
+      } else if (SHORT_URL_DOMAINS.some((d) => decoded.includes(d))) {
         shortUrls.add(decoded);
       }
     }
@@ -164,7 +182,6 @@ async function checkMail() {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      // 발신자로 UID 검색
       const uids = await client.search({ from: SENDER }, { uid: true });
       console.log(`[검색] ${SENDER} 메일 ${uids.length}건 발견`);
 
@@ -176,9 +193,11 @@ async function checkMail() {
         );
 
         for await (const msg of messages) {
+          // MAIL_LIMIT 적용
+          if (MAIL_LIMIT > 0 && newCount >= MAIL_LIMIT) break;
+
           const uid = String(msg.uid);
 
-          // 이미 처리한 메일이면 스킵
           const existing = await db.execute({
             sql: 'SELECT id FROM briefings WHERE uid = ?',
             args: [uid],
@@ -195,45 +214,42 @@ async function checkMail() {
           const text = parsed.text || '';
 
           const pdfUrls = await extractPdfUrls(html, text, subject);
-
           if (pdfUrls.length === 0) continue;
 
-          for (const pdfUrl of pdfUrls) {
-            const rawName = pdfUrl.split('/').pop();
-            const safeName = decodeURIComponent(rawName).replace(/[\\/:*?"<>|]/g, '_');
+          // 첫 번째 PDF만 처리 (메일당 하나의 브리핑)
+          const pdfUrl = pdfUrls[0];
+          const rawName = pdfUrl.split('/').pop();
+          const safeName = decodeURIComponent(rawName).replace(/[\\/:*?"<>|]/g, '_');
 
-            // PDF 다운로드 & 텍스트 추출
-            let pdfContent = '';
-            try {
-              const response = await fetch(pdfUrl);
-              if (!response.ok) throw new Error(`HTTP ${response.status}`);
-              const arrayBuffer = await response.arrayBuffer();
-              const pdfBuffer = Buffer.from(arrayBuffer);
-              const data = await pdfParse(pdfBuffer);
-              pdfContent = data.text.trim();
-              console.log(`[PDF] 추출 완료 — ${safeName} (${pdfContent.length}자)`);
-              pdfContent = await summarizePdf(pdfContent, subject);
-              console.log(`[요약] 완료 — ${subject}`);
-            } catch (e) {
-              console.error(`[오류] PDF 처리 실패: ${e.message}`);
-              pdfContent = '(PDF 텍스트 추출 실패)';
-            }
-
-            const result = await db.execute({
-              sql: `INSERT OR IGNORE INTO briefings (uid, subject, sender, mail_date, pdf_filename, pdf_content)
-                    VALUES (?, ?, ?, ?, ?, ?)`,
-              args: [uid, subject, SENDER, mailDate, safeName, pdfContent],
-            });
-
-            const briefingId = result.lastInsertRowid;
-            const briefingUrl = briefingId
-              ? `${SITE_URL}/briefing/${briefingId}`
-              : SITE_URL;
-
-            console.log(`[저장] ${subject} — ${safeName}`);
-            await sendTelegram(subject, safeName, mailDate, briefingUrl);
-            newCount++;
+          // PDF 다운로드
+          let pdfBuffer;
+          try {
+            const response = await fetch(pdfUrl);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const arrayBuffer = await response.arrayBuffer();
+            pdfBuffer = Buffer.from(arrayBuffer);
+            console.log(`[PDF] 다운로드 완료 — ${safeName} (${Math.round(pdfBuffer.length / 1024)}KB)`);
+          } catch (e) {
+            console.error(`[오류] PDF 다운로드 실패: ${e.message}`);
+            continue;
           }
+
+          // Claude로 요약
+          const summary = await summarizePdf(pdfBuffer, subject);
+          console.log(`[요약] 완료 — ${subject}`);
+
+          const result = await db.execute({
+            sql: `INSERT OR IGNORE INTO briefings (uid, subject, sender, mail_date, pdf_filename, pdf_content, pdf_url)
+                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            args: [uid, subject, SENDER, mailDate, safeName, summary, pdfUrl],
+          });
+
+          const briefingId = result.lastInsertRowid;
+          const briefingUrl = briefingId ? `${SITE_URL}/briefing/${briefingId}` : SITE_URL;
+
+          console.log(`[저장] ${subject}`);
+          await sendTelegram(subject, safeName, mailDate, briefingUrl);
+          newCount++;
         }
       }
     } finally {
