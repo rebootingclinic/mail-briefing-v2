@@ -72,14 +72,19 @@ async function checkMail() {
             pdfContent = '(PDF 텍스트 추출 실패)';
           }
 
-          await db.execute({
+          const result = await db.execute({
             sql: `INSERT OR IGNORE INTO briefings (uid, subject, sender, mail_date, pdf_filename, pdf_content)
                   VALUES (?, ?, ?, ?, ?, ?)`,
             args: [uid, subject, SENDER, mailDate, safeName, pdfContent],
           });
 
+          const briefingId = result.lastInsertRowid;
+          const briefingUrl = briefingId
+            ? `${SITE_URL}/briefing/${briefingId}`
+            : SITE_URL;
+
           console.log(`[저장] ${subject} - ${safeName}`);
-          await sendTelegram(subject, safeName, mailDate, SITE_URL);
+          await sendTelegram(subject, safeName, mailDate, briefingUrl);
           newCount++;
         }
       }
