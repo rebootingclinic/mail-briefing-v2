@@ -95,7 +95,7 @@ async function summarizePdf(pdfBuffer, subject) {
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     const prompt = `이 PDF 보고서("${subject}")를 분석하여 한국어로 정리해주세요.
 
