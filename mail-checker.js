@@ -46,48 +46,36 @@ async function resolveShortUrl(url) {
       return finalUrl;
     }
 
-    // me2.do 중간 페이지 → HTML에서 실제 URL 추출
-    if (finalUrl.includes('me2.do') || finalUrl.includes('bridge_url') || finalUrl.includes('naver.me')) {
-      const html = await res.text();
-      console.log(`[me2.do] 페이지 크기: ${html.length}bytes`);
+    // me2.do bridge URL → ?url= 파라미터에 실제 목적지가 담겨 있음
+    if (finalUrl.includes('me2.do') || finalUrl.includes('bridge_url')) {
+      try {
+        const parsed = new URL(finalUrl);
+        const orgUrl = parsed.searchParams.get('url') || parsed.searchParams.get('URL');
+        if (orgUrl && orgUrl.startsWith('http')) {
+          const decoded = decodeURIComponent(orgUrl);
+          console.log(`[me2.do bridge] url 파라미터 추출 성공: ${decoded.slice(0, 80)}`);
+          return decoded;
+        }
+      } catch (e) {
+        console.log(`[me2.do bridge] URL 파싱 실패, HTML 폴백`);
+      }
 
-      // 1) storage.googleapis.com PDF URL
+      // HTML 폴백: storage.googleapis.com PDF URL
+      const html = await res.text();
       const storageMatch = html.match(/https?:\/\/storage\.googleapis\.com\/[^\s"'<>\\]+\.pdf/i);
       if (storageMatch) {
-        console.log(`[me2.do] storage URL 발견: ${storageMatch[0].slice(0, 80)}`);
+        console.log(`[me2.do HTML] storage URL 발견: ${storageMatch[0].slice(0, 80)}`);
         return storageMatch[0];
       }
 
-      // 2) 임의 .pdf URL
-      const anyPdfMatch = html.match(/(https?:\/\/[^\s"'<>\\]+\.pdf)/i);
-      if (anyPdfMatch) {
-        console.log(`[me2.do] PDF URL 발견: ${anyPdfMatch[1].slice(0, 80)}`);
-        return anyPdfMatch[1];
-      }
-
-      // 3) JS location redirect
+      // HTML 폴백: JS redirect
       const jsMatch = html.match(/(?:window\.location(?:\.href)?\s*=|location\.replace\()\s*["'](https?:\/\/[^"']+)["']/);
       if (jsMatch) {
-        console.log(`[me2.do] JS redirect 발견: ${jsMatch[1].slice(0, 80)}`);
+        console.log(`[me2.do HTML] JS redirect: ${jsMatch[1].slice(0, 80)}`);
         return jsMatch[1];
       }
 
-      // 4) meta refresh
-      const metaMatch = html.match(/<meta[^>]+content=["'][^"']*url=(https?:\/\/[^"']+)["']/i);
-      if (metaMatch) {
-        console.log(`[me2.do] meta refresh 발견: ${metaMatch[1].slice(0, 80)}`);
-        return metaMatch[1];
-      }
-
-      // 5) 외부 href (me2.do 제외)
-      const hrefMatch = html.match(/href=["'](https?:\/\/(?!me2\.do)[^"']+)["']/);
-      if (hrefMatch) {
-        console.log(`[me2.do] href 발견: ${hrefMatch[1].slice(0, 80)}`);
-        return hrefMatch[1];
-      }
-
-      // 6) 디버그: HTML 앞부분 출력
-      console.log(`[me2.do] 해석 실패 — HTML 앞 300자:\n${html.slice(0, 300)}`);
+      console.log(`[me2.do] 해석 실패 — finalUrl: ${finalUrl.slice(0, 100)}`);
     }
 
     return finalUrl;
