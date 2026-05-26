@@ -104,8 +104,10 @@ async function summarizePdf(pdfBuffer, subject) {
 
   // 시도할 모델 목록 (순서대로 시도)
   const candidates = [
-    { version: 'v1beta', model: 'gemini-2.5-flash-preview-05-20' },
-    { version: 'v1beta', model: 'gemini-2.0-flash' },
+    { version: 'v1beta', model: 'gemini-2.5-flash' },
+    { version: 'v1beta', model: 'gemini-2.5-pro' },
+    { version: 'v1beta', model: 'gemini-2.5-flash-preview-04-17' },
+    { version: 'v1beta', model: 'gemini-2.0-flash-lite' },
   ];
 
   let parts;
