@@ -134,7 +134,7 @@ async function summarizePdf(pdfBuffer, subject) {
 
   const body = JSON.stringify({
     contents: [{ parts }],
-    generationConfig: { maxOutputTokens: 4096, temperature: 0.3 },
+    generationConfig: { maxOutputTokens: 8192, temperature: 0.3 },
   });
 
   for (const { version, model } of candidates) {
@@ -151,9 +151,12 @@ async function summarizePdf(pdfBuffer, subject) {
         console.error(`[요약] ${model}(${version}) 실패: ${res.status} ${JSON.stringify(json).slice(0, 150)}`);
         continue;
       }
-      const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+      const candidate = json.candidates?.[0];
+      const finishReason = candidate?.finishReason;
+      // 여러 parts를 모두 합쳐서 완전한 텍스트 추출
+      const text = (candidate?.content?.parts || []).map(p => p.text || '').join('');
       if (text) {
-        console.log(`[요약] ${model}(${version}) 성공`);
+        console.log(`[요약] ${model}(${version}) 성공 (finishReason: ${finishReason}, 길이: ${text.length}자)`);
         return text;
       }
       console.error(`[요약] ${model}(${version}) 응답 없음:`, JSON.stringify(json).slice(0, 150));
