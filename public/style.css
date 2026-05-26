@@ -44,6 +44,18 @@ main { flex: 1; max-width: 900px; width: 100%; margin: 32px auto; padding: 0 20p
 .summary-content p { font-size: .95rem; line-height: 1.85; color: #333; margin-bottom: 10px; }
 .summary-content hr { border: none; border-top: 1px solid #e8ecf4; margin: 20px 0; }
 
+/* 차트 갤러리 */
+.chart-gallery { margin-top: 32px; border-top: 2px solid #e8f0fe; padding-top: 24px; }
+.chart-gallery-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 1rem; font-weight: 700; color: #1a56db; }
+.chart-count { background: #e8f0fe; color: #1a56db; padding: 3px 10px; border-radius: 12px; font-size: .82rem; font-weight: 600; }
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.chart-item { background: #f8faff; border: 1px solid #e8ecf4; border-radius: 10px; overflow: hidden; cursor: pointer; transition: box-shadow .2s; }
+.chart-item:hover { box-shadow: 0 4px 16px rgba(26,86,219,.15); }
+.chart-img { width: 100%; display: block; transition: transform .2s; }
+.chart-item-expanded { grid-column: 1 / -1; }
+.chart-item-expanded .chart-img { max-width: 100%; }
+.chart-page-label { text-align: center; padding: 6px; font-size: .78rem; color: #888; background: #f0f4ff; }
+
 footer { text-align: center; padding: 20px; font-size: .82rem; color: #aaa; }
 
 @media (max-width: 600px) {

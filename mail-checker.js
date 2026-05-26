@@ -2,6 +2,10 @@ require('dotenv').config();
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { execFile } = require('child_process');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
 const { db } = require('./db');
 const { sendTelegram } = require('./telegram');
 
@@ -88,7 +92,7 @@ async function resolveShortUrl(url) {
 // Gemini REST API로 PDF 요약 (SDK 없이 직접 호출)
 async function summarizePdf(pdfBuffer, subject) {
   if (!process.env.GEMINI_API_KEY) {
-    return '(GEMINI_API_KEY 없음 — 요약 불가)';
+    return { summary: '(GEMINI_API_KEY 없음 — 요약 불가)', chartPages: [] };
   }
 
   const prompt = `당신은 PDF 보고서 분석 전문가입니다. 아래 PDF("${subject}")를 분석하여 한국어로 상세한 브리핑을 작성해주세요.
@@ -119,7 +123,11 @@ PDF에 포함된 차트·그래프·표·인포그래픽을 모두 열거하고 
 보고서에서 언급된 핵심 수치, 비율, 순위, 금액, 변화율 등을 항목별로 정리하세요. (최소 5개 이상)
 
 ## 시사점 & 전망
-이 보고서가 시장·실무·정책에 주는 함의와 향후 전망을 4~6문장으로 서술하세요.`;
+이 보고서가 시장·실무·정책에 주는 함의와 향후 전망을 4~6문장으로 서술하세요.
+
+---
+**[차트 페이지 목록]** 위 브리핑을 모두 작성한 뒤, 마지막 줄에 아래 형식으로 중요한 차트·그래프·표·인포그래픽이 있는 PDF 페이지 번호를 JSON으로 출력하세요. PDF의 실제 페이지 순서(1부터 시작)를 기준으로 최대 15개까지:
+{"chart_pages":[2,14,17,23,29]}`;
 
   // 시도할 모델 목록 (순서대로 시도)
   const candidates = [
@@ -138,7 +146,7 @@ PDF에 포함된 차트·그래프·표·인포그래픽을 모두 열거하고 
     const data = await pdfParse(pdfBuffer);
     const text = data.text.trim();
     if (!text || text.length < 100) {
-      return `대용량 PDF이며 텍스트 추출이 불가능합니다. 원문 링크를 통해 직접 확인해주세요.`;
+      return { summary: `대용량 PDF이며 텍스트 추출이 불가능합니다. 원문 링크를 통해 직접 확인해주세요.`, chartPages: [] };
     }
     parts = [{ text: `이 보고서("${subject}")를 요약해주세요.\n\n## 핵심 주제\n## 주요 내용\n## 시사점\n\n---\n${text.slice(0, 8000)}` }];
   }
@@ -165,10 +173,18 @@ PDF에 포함된 차트·그래프·표·인포그래픽을 모두 열거하고 
       const candidate = json.candidates?.[0];
       const finishReason = candidate?.finishReason;
       // 여러 parts를 모두 합쳐서 완전한 텍스트 추출
-      const text = (candidate?.content?.parts || []).map(p => p.text || '').join('');
-      if (text) {
-        console.log(`[요약] ${model}(${version}) 성공 (finishReason: ${finishReason}, 길이: ${text.length}자)`);
-        return text;
+      const rawText = (candidate?.content?.parts || []).map(p => p.text || '').join('');
+      if (rawText) {
+        // 마지막 줄에서 {"chart_pages":[...]} JSON 추출
+        const jsonMatch = rawText.match(/\{"chart_pages"\s*:\s*\[[\d,\s]*\]\}/);
+        let chartPages = [];
+        let summary = rawText;
+        if (jsonMatch) {
+          try { chartPages = JSON.parse(jsonMatch[0]).chart_pages || []; } catch (e) {}
+          summary = rawText.replace(jsonMatch[0], '').trim();
+        }
+        console.log(`[요약] ${model}(${version}) 성공 (finishReason: ${finishReason}, 길이: ${summary.length}자, 차트페이지: [${chartPages.join(',')}])`);
+        return { summary, chartPages };
       }
       console.error(`[요약] ${model}(${version}) 응답 없음:`, JSON.stringify(json).slice(0, 150));
     } catch (e) {
@@ -176,7 +192,54 @@ PDF에 포함된 차트·그래프·표·인포그래픽을 모두 열거하고 
     }
   }
 
-  return '(요약 오류: 모든 Gemini 모델 실패 — Railway 로그 확인)';
+  return { summary: '(요약 오류: 모든 Gemini 모델 실패 — Railway 로그 확인)', chartPages: [] };
+}
+
+// PDF 특정 페이지를 JPEG 이미지로 추출 후 DB 저장 (pdftoppm 사용)
+async function extractAndStoreChartPages(pdfBuffer, briefingId, chartPages) {
+  if (!chartPages || chartPages.length === 0) return;
+
+  const tmpPdf = path.join(os.tmpdir(), `brief_${briefingId}_${Date.now()}.pdf`);
+  try {
+    fs.writeFileSync(tmpPdf, pdfBuffer);
+  } catch (e) {
+    console.error(`[이미지] PDF 임시 저장 실패: ${e.message}`);
+    return;
+  }
+
+  for (const pageNum of chartPages) {
+    const tmpPrefix = path.join(os.tmpdir(), `brief_${briefingId}_p${pageNum}_${Date.now()}`);
+    try {
+      await new Promise((resolve, reject) => {
+        execFile(
+          'pdftoppm',
+          ['-jpeg', '-r', '120', '-f', String(pageNum), '-l', String(pageNum), tmpPdf, tmpPrefix],
+          { timeout: 30000 },
+          (err) => { if (err) reject(err); else resolve(); }
+        );
+      });
+
+      // pdftoppm은 prefix-000001.jpg 형식으로 파일 생성
+      const dir = os.tmpdir();
+      const base = path.basename(tmpPrefix);
+      const files = fs.readdirSync(dir).filter(f => f.startsWith(base) && /\.(jpg|jpeg|ppm)$/i.test(f));
+      if (files.length > 0) {
+        const imgBuf = fs.readFileSync(path.join(dir, files[0]));
+        await db.execute({
+          sql: 'INSERT INTO briefing_pages (briefing_id, page_num, image_data) VALUES (?, ?, ?)',
+          args: [briefingId, pageNum, imgBuf.toString('base64')],
+        });
+        fs.unlinkSync(path.join(dir, files[0]));
+        console.log(`[이미지] p.${pageNum} 저장 완료`);
+      } else {
+        console.warn(`[이미지] p.${pageNum} 파일 없음`);
+      }
+    } catch (e) {
+      console.error(`[이미지] p.${pageNum} 추출 실패: ${e.message}`);
+    }
+  }
+
+  try { fs.unlinkSync(tmpPdf); } catch (e) {}
 }
 
 // 이메일 본문에서 PDF URL 추출
@@ -329,8 +392,8 @@ async function checkMail() {
             continue;
           }
 
-          // Claude로 요약
-          const summary = await summarizePdf(pdfBuffer, subject);
+          // Gemini로 요약 (summary + chartPages 반환)
+          const { summary, chartPages } = await summarizePdf(pdfBuffer, subject);
           console.log(`[요약] 완료 — ${subject}`);
 
           const result = await db.execute({
@@ -341,6 +404,12 @@ async function checkMail() {
 
           const briefingId = result.lastInsertRowid;
           const briefingUrl = briefingId ? `${SITE_URL}/briefing/${briefingId}` : SITE_URL;
+
+          // 차트 페이지 이미지 추출 (pdftoppm)
+          if (briefingId && chartPages.length > 0) {
+            console.log(`[이미지] ${chartPages.length}개 페이지 추출 시작: [${chartPages.join(',')}]`);
+            await extractAndStoreChartPages(pdfBuffer, Number(briefingId), chartPages);
+          }
 
           console.log(`[저장] ${subject}`);
           await sendTelegram(subject, safeName, mailDate, briefingUrl);

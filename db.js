@@ -20,6 +20,14 @@ async function initDb() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS briefing_pages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      briefing_id INTEGER NOT NULL,
+      page_num INTEGER NOT NULL,
+      image_data TEXT NOT NULL
+    )
+  `);
   // 기존 테이블에 pdf_url 컬럼 추가 (없을 경우만)
   try {
     await db.execute(`ALTER TABLE briefings ADD COLUMN pdf_url TEXT`);

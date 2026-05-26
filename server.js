@@ -62,7 +62,27 @@ app.get('/briefing/:id', async (req, res) => {
   briefing.pdf_viewer_url = briefing.pdf_url
     ? `https://docs.google.com/viewer?url=${encodeURIComponent(briefing.pdf_url)}`
     : null;
-  res.render('detail', { briefing });
+
+  // 차트 페이지 번호 목록 조회
+  const pagesResult = await db.execute({
+    sql: 'SELECT page_num FROM briefing_pages WHERE briefing_id = ? ORDER BY page_num',
+    args: [briefing.id],
+  });
+  const chartPages = pagesResult.rows.map(r => r.page_num);
+
+  res.render('detail', { briefing, chartPages });
+});
+
+// 차트 페이지 이미지 서빙
+app.get('/briefing/:id/page/:pageNum', async (req, res) => {
+  const result = await db.execute({
+    sql: 'SELECT image_data FROM briefing_pages WHERE briefing_id = ? AND page_num = ?',
+    args: [req.params.id, parseInt(req.params.pageNum)],
+  });
+  if (result.rows.length === 0) return res.status(404).end();
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(Buffer.from(result.rows[0].image_data, 'base64'));
 });
 
 // 수동 확인 (즉시 응답 후 백그라운드 처리)
