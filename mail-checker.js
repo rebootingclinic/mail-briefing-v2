@@ -188,7 +188,85 @@ async function summarizePdf(pdfBuffer, subject) {
   return { summary: '(요약 오류: 모든 Gemini 모델 실패 — Railway 로그 확인)', chartPages: [] };
 }
 
-// PDF 특정 페이지를 JPEG 이미지로 추출 후 DB 저장 (pdftoppm 사용)
+// Gemini Vision으로 차트/그래프 바운딩 박스 감지 (정규화 좌표 0.0~1.0)
+async function detectChartBbox(imageBuffer) {
+  if (!process.env.GEMINI_API_KEY) return null;
+
+  const prompt = `이 이미지는 PDF 보고서의 한 페이지입니다.
+페이지에서 가장 중요한 차트, 그래프, 또는 표의 위치를 찾으세요.
+
+다음 JSON 형식으로만 응답하세요 (추가 설명 없이):
+- 차트/그래프/표가 있는 경우: {"x": 0.05, "y": 0.20, "w": 0.90, "h": 0.55}
+  (x, y = 왼쪽 상단 좌표 비율, w/h = 너비/높이 비율, 모두 0.0~1.0)
+- 차트가 없는 경우: {"found": false}`;
+
+  const requestBody = {
+    contents: [{
+      parts: [
+        { inline_data: { mime_type: 'image/jpeg', data: imageBuffer.toString('base64') } },
+        { text: prompt },
+      ],
+    }],
+    generationConfig: { maxOutputTokens: 256, temperature: 0 },
+    thinkingConfig: { thinkingBudget: 0 },  // thinking 비활성화 (빠른 좌표 추출)
+  };
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(30000),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      console.error(`[bbox] Gemini 실패: ${res.status} ${JSON.stringify(json).slice(0, 100)}`);
+      return null;
+    }
+    const text = (json.candidates?.[0]?.content?.parts || [])
+      .map(p => p.text || '').join('').trim();
+    const match = text.match(/\{[^{}]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]);
+    if (parsed.found === false) return null;
+    if (typeof parsed.x === 'number' && typeof parsed.y === 'number' &&
+        typeof parsed.w === 'number' && typeof parsed.h === 'number') {
+      return parsed;
+    }
+    return null;
+  } catch (e) {
+    console.error(`[bbox] 오류: ${e.message}`);
+    return null;
+  }
+}
+
+// sharp로 이미지 크롭 (바운딩 박스 기준)
+async function cropImage(imgBuf, bbox) {
+  try {
+    const sharp = require('sharp');
+    const meta = await sharp(imgBuf).metadata();
+    const left   = Math.max(0, Math.round(bbox.x * meta.width));
+    const top    = Math.max(0, Math.round(bbox.y * meta.height));
+    const width  = Math.min(meta.width  - left, Math.round(bbox.w * meta.width));
+    const height = Math.min(meta.height - top,  Math.round(bbox.h * meta.height));
+
+    if (width < 80 || height < 80) {
+      console.warn(`[bbox] 크롭 영역 너무 작음 (${width}×${height}px) — 전체 페이지 사용`);
+      return imgBuf;
+    }
+
+    return await sharp(imgBuf)
+      .extract({ left, top, width, height })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+  } catch (e) {
+    console.error(`[bbox] 크롭 실패: ${e.message}`);
+    return imgBuf;
+  }
+}
+
+// PDF 특정 페이지를 JPEG로 추출 → Gemini로 차트 영역 감지 → 크롭 후 DB 저장
 async function extractAndStoreChartPages(pdfBuffer, briefingId, chartPages) {
   if (!chartPages || chartPages.length === 0) return;
 
@@ -203,13 +281,13 @@ async function extractAndStoreChartPages(pdfBuffer, briefingId, chartPages) {
   for (const pageNum of chartPages) {
     const tmpOut = path.join(os.tmpdir(), `brief_${briefingId}_p${pageNum}_${Date.now()}.jpg`);
     try {
+      // 1단계: ghostscript로 전체 페이지 JPEG 렌더링
       await new Promise((resolve, reject) => {
         execFile(
           'gs',
           [
             '-dNOPAUSE', '-dBATCH', '-dSAFER',
-            '-dFILTERTEXT',              // 텍스트 레이어 제거, 차트·그래프만 렌더링
-            '-sDEVICE=jpeg', '-dJPEGQ=88', '-r150',  // 해상도 150dpi로 향상
+            '-sDEVICE=jpeg', '-dJPEGQ=88', '-r150',
             `-dFirstPage=${pageNum}`, `-dLastPage=${pageNum}`,
             `-sOutputFile=${tmpOut}`,
             tmpPdf,
@@ -219,17 +297,30 @@ async function extractAndStoreChartPages(pdfBuffer, briefingId, chartPages) {
         );
       });
 
-      if (fs.existsSync(tmpOut)) {
-        const imgBuf = fs.readFileSync(tmpOut);
-        await db.execute({
-          sql: 'INSERT INTO briefing_pages (briefing_id, page_num, image_data) VALUES (?, ?, ?)',
-          args: [briefingId, pageNum, imgBuf.toString('base64')],
-        });
-        fs.unlinkSync(tmpOut);
-        console.log(`[이미지] p.${pageNum} 저장 완료`);
-      } else {
+      if (!fs.existsSync(tmpOut)) {
         console.warn(`[이미지] p.${pageNum} 파일 없음`);
+        continue;
       }
+
+      let imgBuf = fs.readFileSync(tmpOut);
+      fs.unlinkSync(tmpOut);
+
+      // 2단계: Gemini로 차트 바운딩 박스 감지
+      const bbox = await detectChartBbox(imgBuf);
+      if (bbox) {
+        console.log(`[bbox] p.${pageNum} 차트 감지 — x:${bbox.x.toFixed(2)} y:${bbox.y.toFixed(2)} w:${bbox.w.toFixed(2)} h:${bbox.h.toFixed(2)}`);
+        // 3단계: 차트 영역만 크롭
+        imgBuf = await cropImage(imgBuf, bbox);
+      } else {
+        console.log(`[bbox] p.${pageNum} 차트 미감지 — 전체 페이지 저장`);
+      }
+
+      // 4단계: DB 저장
+      await db.execute({
+        sql: 'INSERT INTO briefing_pages (briefing_id, page_num, image_data) VALUES (?, ?, ?)',
+        args: [briefingId, pageNum, imgBuf.toString('base64')],
+      });
+      console.log(`[이미지] p.${pageNum} 저장 완료`);
     } catch (e) {
       console.error(`[이미지] p.${pageNum} 추출 실패: ${e.message}`);
     }
