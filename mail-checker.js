@@ -208,7 +208,8 @@ async function extractAndStoreChartPages(pdfBuffer, briefingId, chartPages) {
           'gs',
           [
             '-dNOPAUSE', '-dBATCH', '-dSAFER',
-            '-sDEVICE=jpeg', '-dJPEGQ=82', '-r120',
+            '-dFILTERTEXT',              // 텍스트 레이어 제거, 차트·그래프만 렌더링
+            '-sDEVICE=jpeg', '-dJPEGQ=88', '-r150',  // 해상도 150dpi로 향상
             `-dFirstPage=${pageNum}`, `-dLastPage=${pageNum}`,
             `-sOutputFile=${tmpOut}`,
             tmpPdf,
