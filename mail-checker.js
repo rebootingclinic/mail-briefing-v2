@@ -208,28 +208,30 @@ async function extractAndStoreChartPages(pdfBuffer, briefingId, chartPages) {
   }
 
   for (const pageNum of chartPages) {
-    const tmpPrefix = path.join(os.tmpdir(), `brief_${briefingId}_p${pageNum}_${Date.now()}`);
+    const tmpOut = path.join(os.tmpdir(), `brief_${briefingId}_p${pageNum}_${Date.now()}.jpg`);
     try {
       await new Promise((resolve, reject) => {
         execFile(
-          'pdftoppm',
-          ['-jpeg', '-r', '120', '-f', String(pageNum), '-l', String(pageNum), tmpPdf, tmpPrefix],
+          'gs',
+          [
+            '-dNOPAUSE', '-dBATCH', '-dSAFER',
+            '-sDEVICE=jpeg', '-dJPEGQ=82', '-r120',
+            `-dFirstPage=${pageNum}`, `-dLastPage=${pageNum}`,
+            `-sOutputFile=${tmpOut}`,
+            tmpPdf,
+          ],
           { timeout: 30000 },
           (err) => { if (err) reject(err); else resolve(); }
         );
       });
 
-      // pdftoppm은 prefix-000001.jpg 형식으로 파일 생성
-      const dir = os.tmpdir();
-      const base = path.basename(tmpPrefix);
-      const files = fs.readdirSync(dir).filter(f => f.startsWith(base) && /\.(jpg|jpeg|ppm)$/i.test(f));
-      if (files.length > 0) {
-        const imgBuf = fs.readFileSync(path.join(dir, files[0]));
+      if (fs.existsSync(tmpOut)) {
+        const imgBuf = fs.readFileSync(tmpOut);
         await db.execute({
           sql: 'INSERT INTO briefing_pages (briefing_id, page_num, image_data) VALUES (?, ?, ?)',
           args: [briefingId, pageNum, imgBuf.toString('base64')],
         });
-        fs.unlinkSync(path.join(dir, files[0]));
+        fs.unlinkSync(tmpOut);
         console.log(`[이미지] p.${pageNum} 저장 완료`);
       } else {
         console.warn(`[이미지] p.${pageNum} 파일 없음`);
