@@ -34,37 +34,9 @@
         <%- briefing.summary_html %>
       </div>
 
-      <% if (chartPages && chartPages.length > 0) { %>
-      <div class="chart-gallery">
-        <div class="chart-gallery-header">
-          <span>📊 차트 & 그래프 원본 페이지</span>
-          <span class="chart-count"><%= chartPages.length %>페이지</span>
-        </div>
-        <div class="chart-grid">
-          <% for (const pageNum of chartPages) { %>
-          <div class="chart-item">
-            <img
-              src="/briefing/<%= briefing.id %>/page/<%= pageNum %>"
-              alt="PDF p.<%= pageNum %>"
-              loading="lazy"
-              class="chart-img"
-              onclick="toggleExpand(this)"
-            />
-            <div class="chart-page-label">p.<%= pageNum %></div>
-          </div>
-          <% } %>
-        </div>
-      </div>
-      <% } %>
     </div>
   </main>
 
-  <script>
-    function toggleExpand(img) {
-      img.classList.toggle('chart-img-expanded');
-      img.closest('.chart-item').classList.toggle('chart-item-expanded');
-    }
-  </script>
 
   <footer><p>1시간마다 자동 확인 · 새 브리핑 도착 시 텔레그램 알림</p></footer>
 </body>

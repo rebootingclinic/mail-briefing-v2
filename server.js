@@ -4,6 +4,27 @@ const cron = require('node-cron');
 const { db, initDb } = require('./db');
 const { checkMail } = require('./mail-checker');
 
+// (Np) 페이지 참조가 있는 단락/항목 아래에 해당 이미지 삽입
+function injectPageImages(html, briefingId, chartPages) {
+  if (!chartPages || chartPages.length === 0) return html;
+  const pageSet = new Set(chartPages.map(Number));
+  const usedPages = new Set();
+
+  // <li>...</li> 또는 <p>...</p> 안에 (Np) 패턴이 있으면 바로 아래 이미지 삽입
+  return html.replace(/<(li|p)>([\s\S]*?)<\/(li|p)>/g, (match, openTag, content) => {
+    const pageMatch = content.match(/\((\d+)p\)/);
+    if (pageMatch) {
+      const pageNum = parseInt(pageMatch[1]);
+      if (pageSet.has(pageNum) && !usedPages.has(pageNum)) {
+        usedPages.add(pageNum);
+        const img = `<div class="inline-chart"><img src="/briefing/${briefingId}/page/${pageNum}" loading="lazy" onclick="this.classList.toggle('expanded')" /><span class="inline-chart-label">p.${pageNum}</span></div>`;
+        return `<${openTag}>${content}</${openTag}>${img}`;
+      }
+    }
+    return match;
+  });
+}
+
 // 간단한 마크다운 → HTML 변환
 function mdToHtml(text) {
   if (!text) return '';
@@ -57,7 +78,7 @@ app.get('/briefing/:id', async (req, res) => {
   });
   if (result.rows.length === 0) return res.status(404).send('브리핑을 찾을 수 없습니다.');
   const briefing = result.rows[0];
-  briefing.summary_html = mdToHtml(briefing.pdf_content || '');
+  briefing.summary_html = injectPageImages(mdToHtml(briefing.pdf_content || ''), briefing.id, chartPages);
   // Google Docs Viewer로 열면 브라우저에서 바로 PDF 표시 (다운로드 없이)
   briefing.pdf_viewer_url = briefing.pdf_url
     ? `https://docs.google.com/viewer?url=${encodeURIComponent(briefing.pdf_url)}`
