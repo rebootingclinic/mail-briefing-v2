@@ -6,22 +6,24 @@ const { checkMail } = require('./mail-checker');
 
 // (Np) 페이지 참조가 있는 단락/항목 아래에 해당 이미지 삽입
 function injectPageImages(html, briefingId, chartPages) {
-  if (!chartPages || chartPages.length === 0) return html;
-  const pageSet = new Set(chartPages.map(Number));
+  const pageSet = new Set((chartPages || []).map(Number));
   const usedPages = new Set();
 
-  // <li>...</li> 또는 <p>...</p> 안에 (Np) 패턴이 있으면 바로 아래 이미지 삽입
+  // <li>...</li> 또는 <p>...</p> 처리:
+  // (Np) 마커는 이미지 위치 감지에만 사용하고 화면 텍스트에서는 항상 제거
   return html.replace(/<(li|p)>([\s\S]*?)<\/(li|p)>/g, (match, openTag, content) => {
     const pageMatch = content.match(/\((\d+)p\)/);
-    if (pageMatch) {
+    const cleanContent = content.replace(/\s*\(\d+p\)/g, '').trim();
+
+    if (pageMatch && pageSet.size > 0) {
       const pageNum = parseInt(pageMatch[1]);
       if (pageSet.has(pageNum) && !usedPages.has(pageNum)) {
         usedPages.add(pageNum);
         const img = `<div class="inline-chart"><img src="/briefing/${briefingId}/page/${pageNum}" loading="lazy" onclick="this.classList.toggle('expanded')" /><span class="inline-chart-label">p.${pageNum}</span></div>`;
-        return `<${openTag}>${content}</${openTag}>${img}`;
+        return `<${openTag}>${cleanContent}</${openTag}>${img}`;
       }
     }
-    return match;
+    return `<${openTag}>${cleanContent}</${openTag}>`;
   });
 }
 
