@@ -10,9 +10,9 @@ function injectPageImages(html, briefingId, chartPages) {
   const usedPages = new Set();
 
   // (12p) 또는 (12p, 15p) 등 모든 패턴 매칭
-  const markerPattern = /\(\d+p(?:,\s*\d+p)*\)/g;
+  const markerPattern = /\s*\(\d+p(?:,\s*\d+p)*\)/g;
 
-  return html.replace(/<(li|p)>([\s\S]*?)<\/(li|p)>/g, (match, openTag, content) => {
+  let result = html.replace(/<(li|p)>([\s\S]*?)<\/(li|p)>/g, (match, openTag, content) => {
     // 마커에서 모든 페이지 번호 추출
     const allPageNums = [];
     for (const m of content.matchAll(/\((\d+p(?:,\s*\d+p)*)\)/g)) {
@@ -35,6 +35,9 @@ function injectPageImages(html, briefingId, chartPages) {
 
     return `<${openTag}>${cleanContent}</${openTag}>${imgs}`;
   });
+
+  // <h2> 등 위에서 처리 못한 태그에 남은 마커도 모두 제거
+  return result.replace(markerPattern, '');
 }
 
 // 간단한 마크다운 → HTML 변환
