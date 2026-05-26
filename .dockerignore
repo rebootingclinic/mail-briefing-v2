@@ -1,0 +1,6 @@
+node_modules
+.env
+*.db
+pdfs
+out.txt
+err.txt
