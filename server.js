@@ -87,11 +87,57 @@ app.get('/briefing/:id/page/:pageNum', async (req, res) => {
 
 // DB 초기화 (테스트용)
 app.post('/reset-db', async (req, res) => {
-  try {
-    await db.execute('DELETE FROM briefing_pages');
-  } catch (e) { /* 테이블 없으면 무시 */ }
+  try { await db.execute('DELETE FROM briefing_pages'); } catch (e) {}
   await db.execute('DELETE FROM briefings');
   res.send('✅ DB 초기화 완료 — <a href="/">목록으로</a>');
+});
+
+// gs(ghostscript) 설치 확인 — Gemini 호출 없이 테스트
+app.get('/check-tools', (req, res) => {
+  const { execFile } = require('child_process');
+  execFile('gs', ['--version'], (err, stdout) => {
+    if (err) return res.send(`❌ ghostscript 없음: ${err.message}`);
+    res.send(`✅ ghostscript ${stdout.trim()} 사용 가능`);
+  });
+});
+
+// 기존 브리핑 이미지만 재추출 — Gemini 재호출 없음
+app.post('/retry-images/:id', async (req, res) => {
+  const result = await db.execute({
+    sql: 'SELECT * FROM briefings WHERE id = ?',
+    args: [req.params.id],
+  });
+  if (result.rows.length === 0) return res.status(404).send('브리핑 없음');
+  const briefing = result.rows[0];
+
+  // DB에 저장된 chart_pages 사용, 없으면 요약 텍스트에서 (Np) 패턴 파싱
+  let pageNums = [];
+  if (briefing.chart_pages) {
+    try { pageNums = JSON.parse(briefing.chart_pages); } catch (e) {}
+  }
+  if (pageNums.length === 0) {
+    const matches = [...(briefing.pdf_content || '').matchAll(/\((\d+)p\)/g)];
+    pageNums = [...new Set(matches.map(m => parseInt(m[1])))].filter(n => n > 0 && n <= 500).sort((a, b) => a - b);
+  }
+  if (pageNums.length === 0) return res.send('⚠️ 저장된 페이지 번호 없음 — 브리핑을 다시 처리하세요');
+
+  try {
+    const pdfRes = await fetch(briefing.pdf_url, { signal: AbortSignal.timeout(60000) });
+    if (!pdfRes.ok) throw new Error(`PDF 다운로드 실패: HTTP ${pdfRes.status}`);
+    const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
+
+    await db.execute({ sql: 'DELETE FROM briefing_pages WHERE briefing_id = ?', args: [briefing.id] });
+    const { extractAndStoreChartPages } = require('./mail-checker');
+    await extractAndStoreChartPages(pdfBuffer, briefing.id, pageNums);
+
+    const cnt = (await db.execute({
+      sql: 'SELECT COUNT(*) as n FROM briefing_pages WHERE briefing_id = ?',
+      args: [briefing.id],
+    })).rows[0].n;
+    res.send(`✅ ${pageNums.length}개 시도 → ${cnt}개 저장 (<a href="/briefing/${briefing.id}">브리핑 보기</a>)`);
+  } catch (e) {
+    res.status(500).send(`❌ ${e.message}`);
+  }
 });
 
 // 수동 확인 (즉시 응답 후 백그라운드 처리)

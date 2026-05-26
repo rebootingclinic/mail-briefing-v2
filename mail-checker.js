@@ -407,8 +407,12 @@ async function checkMail() {
           const briefingId = result.lastInsertRowid;
           const briefingUrl = briefingId ? `${SITE_URL}/briefing/${briefingId}` : SITE_URL;
 
-          // 차트 페이지 이미지 추출 (pdftoppm)
+          // chart_pages를 DB에 저장 (나중에 이미지 재추출 가능하도록)
           if (briefingId && chartPages.length > 0) {
+            await db.execute({
+              sql: 'UPDATE briefings SET chart_pages = ? WHERE id = ?',
+              args: [JSON.stringify(chartPages), Number(briefingId)],
+            });
             console.log(`[이미지] ${chartPages.length}개 페이지 추출 시작: [${chartPages.join(',')}]`);
             await extractAndStoreChartPages(pdfBuffer, Number(briefingId), chartPages);
           }
@@ -433,4 +437,4 @@ async function checkMail() {
   return { newCount };
 }
 
-module.exports = { checkMail };
+module.exports = { checkMail, extractAndStoreChartPages };

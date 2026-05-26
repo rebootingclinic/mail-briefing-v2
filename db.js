@@ -28,11 +28,12 @@ async function initDb() {
       image_data TEXT NOT NULL
     )
   `);
-  // 기존 테이블에 pdf_url 컬럼 추가 (없을 경우만)
-  try {
-    await db.execute(`ALTER TABLE briefings ADD COLUMN pdf_url TEXT`);
-  } catch (e) {
-    // 이미 존재하면 무시
+  // 기존 테이블에 컬럼 추가 (없을 경우만)
+  for (const col of [
+    'ALTER TABLE briefings ADD COLUMN pdf_url TEXT',
+    'ALTER TABLE briefings ADD COLUMN chart_pages TEXT',
+  ]) {
+    try { await db.execute(col); } catch (e) { /* 이미 존재하면 무시 */ }
   }
 }
 
