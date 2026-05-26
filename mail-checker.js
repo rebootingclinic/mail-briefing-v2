@@ -116,8 +116,8 @@ async function summarizePdf(pdfBuffer, subject) {
 실무·시장·정책 함의를 3~4문장으로 서술하세요.
 
 ---
-마지막 줄에 아래 JSON을 출력하세요 (위에서 (Np)로 표기한 페이지 번호 목록, 최대 15개):
-{"chart_pages":[2,8,9,14,17]}`;
+마지막 줄에 아래 JSON을 출력하세요 (위에서 (Np)로 표기한 가장 중요한 차트·그래프 페이지 번호, 최대 5개):
+{"chart_pages":[2,8,9]}`;
 
   // 시도할 모델 목록 (순서대로 시도)
   const candidates = [
@@ -194,51 +194,60 @@ async function detectChartBbox(imageBuffer) {
 
   const prompt = `이 이미지는 PDF 보고서의 한 페이지입니다.
 페이지에서 가장 중요한 차트, 그래프, 또는 표의 위치를 찾으세요.
+반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
+차트/그래프/표가 있는 경우: {"x": 0.05, "y": 0.20, "w": 0.90, "h": 0.55}
+차트가 없는 경우: {"found": false}
+x, y = 왼쪽 상단 좌표 비율 (0.0~1.0), w, h = 너비/높이 비율 (0.0~1.0)`;
 
-다음 JSON 형식으로만 응답하세요 (추가 설명 없이):
-- 차트/그래프/표가 있는 경우: {"x": 0.05, "y": 0.20, "w": 0.90, "h": 0.55}
-  (x, y = 왼쪽 상단 좌표 비율, w/h = 너비/높이 비율, 모두 0.0~1.0)
-- 차트가 없는 경우: {"found": false}`;
+  // gemini-2.0-flash 우선 (thinking 없이 빠름), 실패 시 2.5-flash 폴백
+  const models = [
+    { model: 'gemini-2.0-flash', useThinking: false },
+    { model: 'gemini-2.5-flash', useThinking: true },
+  ];
 
-  const requestBody = {
-    contents: [{
-      parts: [
-        { inline_data: { mime_type: 'image/jpeg', data: imageBuffer.toString('base64') } },
-        { text: prompt },
-      ],
-    }],
-    generationConfig: { maxOutputTokens: 256, temperature: 0 },
-    thinkingConfig: { thinkingBudget: 0 },  // thinking 비활성화 (빠른 좌표 추출)
-  };
+  for (const { model, useThinking } of models) {
+    try {
+      const requestBody = {
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: 'image/jpeg', data: imageBuffer.toString('base64') } },
+            { text: prompt },
+          ],
+        }],
+        generationConfig: { maxOutputTokens: 512, temperature: 0 },
+        ...(useThinking && { thinkingConfig: { thinkingBudget: 0 } }),
+      };
 
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(30000),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      console.error(`[bbox] Gemini 실패: ${res.status} ${JSON.stringify(json).slice(0, 100)}`);
-      return null;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(30000),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        console.error(`[bbox] ${model} 실패: ${res.status} ${JSON.stringify(json).slice(0, 80)}`);
+        continue;
+      }
+      const text = (json.candidates?.[0]?.content?.parts || [])
+        .map(p => p.text || '').join('').trim();
+      console.log(`[bbox] ${model} 응답: ${text.slice(0, 120)}`);
+
+      const match = text.match(/\{[^{}]*\}/);
+      if (!match) continue;
+      const parsed = JSON.parse(match[0]);
+      if (parsed.found === false) return null;
+      if (typeof parsed.x === 'number' && typeof parsed.y === 'number' &&
+          typeof parsed.w === 'number' && typeof parsed.h === 'number' &&
+          parsed.w > 0.05 && parsed.h > 0.05) {
+        return parsed;
+      }
+    } catch (e) {
+      console.error(`[bbox] ${model} 오류: ${e.message}`);
     }
-    const text = (json.candidates?.[0]?.content?.parts || [])
-      .map(p => p.text || '').join('').trim();
-    const match = text.match(/\{[^{}]*\}/);
-    if (!match) return null;
-    const parsed = JSON.parse(match[0]);
-    if (parsed.found === false) return null;
-    if (typeof parsed.x === 'number' && typeof parsed.y === 'number' &&
-        typeof parsed.w === 'number' && typeof parsed.h === 'number') {
-      return parsed;
-    }
-    return null;
-  } catch (e) {
-    console.error(`[bbox] 오류: ${e.message}`);
-    return null;
   }
+  return null;
 }
 
 // sharp로 이미지 크롭 (바운딩 박스 기준)
