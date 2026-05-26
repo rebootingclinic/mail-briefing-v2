@@ -4,26 +4,36 @@ const cron = require('node-cron');
 const { db, initDb } = require('./db');
 const { checkMail } = require('./mail-checker');
 
-// (Np) 페이지 참조가 있는 단락/항목 아래에 해당 이미지 삽입
+// (Np) 또는 (Np, Mp) 페이지 참조가 있는 단락/항목 아래에 해당 이미지 삽입
 function injectPageImages(html, briefingId, chartPages) {
   const pageSet = new Set((chartPages || []).map(Number));
   const usedPages = new Set();
 
-  // <li>...</li> 또는 <p>...</p> 처리:
-  // (Np) 마커는 이미지 위치 감지에만 사용하고 화면 텍스트에서는 항상 제거
-  return html.replace(/<(li|p)>([\s\S]*?)<\/(li|p)>/g, (match, openTag, content) => {
-    const pageMatch = content.match(/\((\d+)p\)/);
-    const cleanContent = content.replace(/\s*\(\d+p\)/g, '').trim();
+  // (12p) 또는 (12p, 15p) 등 모든 패턴 매칭
+  const markerPattern = /\(\d+p(?:,\s*\d+p)*\)/g;
 
-    if (pageMatch && pageSet.size > 0) {
-      const pageNum = parseInt(pageMatch[1]);
-      if (pageSet.has(pageNum) && !usedPages.has(pageNum)) {
-        usedPages.add(pageNum);
-        const img = `<div class="inline-chart"><img src="/briefing/${briefingId}/page/${pageNum}" loading="lazy" onclick="this.classList.toggle('expanded')" /><span class="inline-chart-label">p.${pageNum}</span></div>`;
-        return `<${openTag}>${cleanContent}</${openTag}>${img}`;
+  return html.replace(/<(li|p)>([\s\S]*?)<\/(li|p)>/g, (match, openTag, content) => {
+    // 마커에서 모든 페이지 번호 추출
+    const allPageNums = [];
+    for (const m of content.matchAll(/\((\d+p(?:,\s*\d+p)*)\)/g)) {
+      for (const num of m[1].match(/\d+/g)) allPageNums.push(Number(num));
+    }
+
+    // 마커를 텍스트에서 제거
+    const cleanContent = content.replace(markerPattern, '').trim();
+
+    // 해당 페이지 이미지 삽입
+    let imgs = '';
+    if (pageSet.size > 0) {
+      for (const pageNum of allPageNums) {
+        if (pageSet.has(pageNum) && !usedPages.has(pageNum)) {
+          usedPages.add(pageNum);
+          imgs += `<div class="inline-chart"><img src="/briefing/${briefingId}/page/${pageNum}" loading="lazy" onclick="this.classList.toggle('expanded')" /><span class="inline-chart-label">p.${pageNum}</span></div>`;
+        }
       }
     }
-    return `<${openTag}>${cleanContent}</${openTag}>`;
+
+    return `<${openTag}>${cleanContent}</${openTag}>${imgs}`;
   });
 }
 
