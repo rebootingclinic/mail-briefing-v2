@@ -85,6 +85,15 @@ app.get('/briefing/:id/page/:pageNum', async (req, res) => {
   res.send(Buffer.from(result.rows[0].image_data, 'base64'));
 });
 
+// DB 초기화 (테스트용)
+app.post('/reset-db', async (req, res) => {
+  try {
+    await db.execute('DELETE FROM briefing_pages');
+  } catch (e) { /* 테이블 없으면 무시 */ }
+  await db.execute('DELETE FROM briefings');
+  res.send('✅ DB 초기화 완료 — <a href="/">목록으로</a>');
+});
+
 // 수동 확인 (즉시 응답 후 백그라운드 처리)
 app.post('/check', (req, res) => {
   res.redirect('/?checked=1');
