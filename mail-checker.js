@@ -91,19 +91,22 @@ async function summarizePdf(pdfBuffer, subject) {
     return '(GEMINI_API_KEY 없음 — 요약 불가)';
   }
 
-  const prompt = `이 PDF 보고서("${subject}")를 텍스트뿐 아니라 차트·그래프·표·인포그래픽 등 시각 자료까지 모두 분석하여 한국어로 정리해주세요.
+  const prompt = `이 PDF 보고서("${subject}")를 텍스트뿐 아니라 차트·그래프·표·인포그래픽 등 시각 자료까지 모두 분석하여 한국어로 브리핑해주세요.
+
+읽는 데 3~5분 정도 걸리는 분량으로 작성해주세요. 단순 나열이 아닌 문장으로 흐름 있게 설명해주세요.
 
 ## 핵심 주제
-한 줄로 핵심 요약
+이 보고서가 다루는 핵심 주제와 배경을 2~3문장으로 설명
 
 ## 주요 내용
-- 핵심 포인트 3~5개
-- 차트·그래프에서 읽히는 수치와 추세 (예: "2024년 xx% 상승", "A가 B보다 2배 높음" 등)
-- 표의 핵심 데이터 및 비교값
-- 이미지·인포그래픽이 전달하는 메시지
+보고서의 핵심 내용을 항목별로 상세히 설명하세요.
+- 각 항목마다 차트·그래프의 구체적 수치와 추세 포함 (예: "2024년 3분기 xx% 상승", "A 지역이 B보다 1.5배 높음")
+- 표에서 눈에 띄는 비교값·순위·변화량 포함
+- 이미지·인포그래픽이 전달하는 메시지 해설
+- 최소 5~8개 항목으로 충분히 상세하게
 
 ## 시사점
-실무적 의미와 활용 방향 2~3문장`;
+이 보고서가 실무·시장·정책에 주는 함의를 3~5문장으로 서술`;
 
   // 시도할 모델 목록 (순서대로 시도)
   const candidates = [
@@ -129,7 +132,10 @@ async function summarizePdf(pdfBuffer, subject) {
     parts = [{ text: `이 보고서("${subject}")를 요약해주세요.\n\n## 핵심 주제\n## 주요 내용\n## 시사점\n\n---\n${text.slice(0, 8000)}` }];
   }
 
-  const body = JSON.stringify({ contents: [{ parts }] });
+  const body = JSON.stringify({
+    contents: [{ parts }],
+    generationConfig: { maxOutputTokens: 4096, temperature: 0.3 },
+  });
 
   for (const { version, model } of candidates) {
     try {
