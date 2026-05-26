@@ -50,20 +50,20 @@ function mdToHtml(text) {
   for (const raw of lines) {
     const line = raw.trimEnd();
     if (/^## (.+)/.test(line)) {
-      if (inList) { result.push('</ul>'); inList = false; }
+      if (inList) { result.push('</ol>'); inList = false; }
       result.push(`<h2>${line.replace(/^## /, '')}</h2>`);
     } else if (/^- (.+)/.test(line) || /^\* (.+)/.test(line)) {
-      if (!inList) { result.push('<ul>'); inList = true; }
+      if (!inList) { result.push('<ol>'); inList = true; }
       result.push(`<li>${line.replace(/^[-*] /, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`);
     } else if (/^---+$/.test(line)) {
-      if (inList) { result.push('</ul>'); inList = false; }
+      if (inList) { result.push('</ol>'); inList = false; }
       result.push('<hr>');
     } else if (line.trim()) {
-      if (inList) { result.push('</ul>'); inList = false; }
+      if (inList) { result.push('</ol>'); inList = false; }
       result.push(`<p>${line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`);
     }
   }
-  if (inList) result.push('</ul>');
+  if (inList) result.push('</ol>');
   return result.join('\n');
 }
 
