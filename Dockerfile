@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:20
 
 # ghostscript 설치 (PDF → JPEG 변환용)
 RUN apt-get update && \
@@ -8,7 +8,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 COPY . .
 
