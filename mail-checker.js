@@ -151,19 +151,22 @@ PDF에 포함된 차트·그래프·표·인포그래픽을 모두 열거하고 
     parts = [{ text: `이 보고서("${subject}")를 요약해주세요.\n\n## 핵심 주제\n## 주요 내용\n## 시사점\n\n---\n${text.slice(0, 8000)}` }];
   }
 
-  const body = JSON.stringify({
-    contents: [{ parts }],
-    generationConfig: { maxOutputTokens: 8192, temperature: 0.3 },
-  });
-
   for (const { version, model } of candidates) {
     try {
+      // Flash 2.5는 thinking 토큰이 output limit을 공유하므로 별도 설정
+      const isFlash = model.includes('flash');
+      const requestBody = {
+        contents: [{ parts }],
+        generationConfig: { maxOutputTokens: 16384, temperature: 0.3 },
+        ...(isFlash && { thinkingConfig: { thinkingBudget: 3000 } }),
+      };
+
       const url = `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body,
-        signal: AbortSignal.timeout(90000),
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(120000),
       });
       const json = await res.json();
       if (!res.ok) {
