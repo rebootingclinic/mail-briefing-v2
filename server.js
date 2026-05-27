@@ -4,40 +4,27 @@ const cron = require('node-cron');
 const { db, initDb } = require('./db');
 const { checkMail } = require('./mail-checker');
 
-// (Np) 또는 (Np, Mp) 페이지 참조가 있는 단락/항목 아래에 해당 이미지 삽입
+// 차트 이미지를 <li> 항목마다 순서대로 삽입 (마커 의존 제거)
 function injectPageImages(html, briefingId, chartPages) {
-  const pageSet = new Set((chartPages || []).map(Number));
-  const usedPages = new Set();
-
-  // (12p) 또는 (12p, 15p) 등 모든 패턴 매칭
+  // (Np) 마커는 표시 텍스트에서 모두 제거
   const markerPattern = /\s*\(\d+p(?:,\s*\d+p)*\)/g;
+  const cleanHtml = html.replace(markerPattern, '');
 
-  let result = html.replace(/<(li|p)>([\s\S]*?)<\/(li|p)>/g, (match, openTag, content) => {
-    // 마커에서 모든 페이지 번호 추출
-    const allPageNums = [];
-    for (const m of content.matchAll(/\((\d+p(?:,\s*\d+p)*)\)/g)) {
-      for (const num of m[1].match(/\d+/g)) allPageNums.push(Number(num));
+  if (!chartPages || chartPages.length === 0) return cleanHtml;
+
+  // 페이지 번호 오름차순 정렬
+  const sortedPages = [...chartPages].map(Number).sort((a, b) => a - b);
+  let idx = 0;
+
+  // <li> 항목마다 차트 이미지를 하나씩 순서대로 붙임
+  return cleanHtml.replace(/<li>([\s\S]*?)<\/li>/g, (match) => {
+    if (idx < sortedPages.length) {
+      const pageNum = sortedPages[idx++];
+      const img = `<div class="inline-chart"><img src="/briefing/${briefingId}/page/${pageNum}" loading="lazy" onclick="this.classList.toggle('expanded')" /><span class="inline-chart-label">p.${pageNum}</span></div>`;
+      return match + img;
     }
-
-    // 마커를 텍스트에서 제거
-    const cleanContent = content.replace(markerPattern, '').trim();
-
-    // 해당 페이지 이미지 삽입
-    let imgs = '';
-    if (pageSet.size > 0) {
-      for (const pageNum of allPageNums) {
-        if (pageSet.has(pageNum) && !usedPages.has(pageNum)) {
-          usedPages.add(pageNum);
-          imgs += `<div class="inline-chart"><img src="/briefing/${briefingId}/page/${pageNum}" loading="lazy" onclick="this.classList.toggle('expanded')" /><span class="inline-chart-label">p.${pageNum}</span></div>`;
-        }
-      }
-    }
-
-    return `<${openTag}>${cleanContent}</${openTag}>${imgs}`;
+    return match;
   });
-
-  // <h2> 등 위에서 처리 못한 태그에 남은 마커도 모두 제거
-  return result.replace(markerPattern, '');
 }
 
 // 간단한 마크다운 → HTML 변환
