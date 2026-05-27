@@ -222,8 +222,10 @@ If no chart or graph exists, set found to false and x,y,w,h to 0.`;
     },
   };
 
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -231,6 +233,12 @@ If no chart or graph exists, set found to false and x,y,w,h to 0.`;
       signal: AbortSignal.timeout(40000),
     });
     const json = await res.json();
+    if (res.status === 503) {
+      const wait = attempt * 8000;
+      console.warn(`[bbox] 503 과부하 (${attempt}/3) — ${wait/1000}초 후 재시도`);
+      await new Promise(r => setTimeout(r, wait));
+      continue;
+    }
     if (!res.ok) {
       console.error(`[bbox] 실패: ${res.status} ${JSON.stringify(json).slice(0, 100)}`);
       return null;
@@ -269,6 +277,9 @@ If no chart or graph exists, set found to false and x,y,w,h to 0.`;
     console.error(`[bbox] 오류: ${e.message}`);
     return null;
   }
+  } // end for
+  console.warn('[bbox] 3회 재시도 모두 실패');
+  return null;
 }
 
 // sharp로 이미지 크롭 (바운딩 박스 기준)
