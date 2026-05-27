@@ -282,15 +282,18 @@ If no chart or graph exists, set found to false and x,y,w,h to 0.`;
   return null;
 }
 
-// sharp로 이미지 크롭 (바운딩 박스 기준)
+// sharp로 이미지 크롭 (바운딩 박스 기준, 여백 8% 추가)
 async function cropImage(imgBuf, bbox) {
   try {
     const sharp = require('sharp');
     const meta = await sharp(imgBuf).metadata();
-    const left   = Math.max(0, Math.round(bbox.x * meta.width));
-    const top    = Math.max(0, Math.round(bbox.y * meta.height));
-    const width  = Math.min(meta.width  - left, Math.round(bbox.w * meta.width));
-    const height = Math.min(meta.height - top,  Math.round(bbox.h * meta.height));
+    const PAD = 0.08; // 상하좌우 8% 여백 추가
+    const left   = Math.max(0, Math.round((bbox.x - PAD) * meta.width));
+    const top    = Math.max(0, Math.round((bbox.y - PAD) * meta.height));
+    const right  = Math.min(meta.width,  Math.round((bbox.x + bbox.w + PAD) * meta.width));
+    const bottom = Math.min(meta.height, Math.round((bbox.y + bbox.h + PAD) * meta.height));
+    const width  = right - left;
+    const height = bottom - top;
 
     if (width < 80 || height < 80) {
       console.warn(`[bbox] 크롭 영역 너무 작음 (${width}×${height}px) — 전체 페이지 사용`);
