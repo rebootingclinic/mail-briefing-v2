@@ -192,62 +192,58 @@ async function summarizePdf(pdfBuffer, subject) {
 async function detectChartBbox(imageBuffer) {
   if (!process.env.GEMINI_API_KEY) return null;
 
-  const prompt = `이 이미지는 PDF 보고서의 한 페이지입니다.
-페이지에서 가장 중요한 차트, 그래프, 또는 표의 위치를 찾으세요.
-반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
-차트/그래프/표가 있는 경우: {"x": 0.05, "y": 0.20, "w": 0.90, "h": 0.55}
-차트가 없는 경우: {"found": false}
-x, y = 왼쪽 상단 좌표 비율 (0.0~1.0), w, h = 너비/높이 비율 (0.0~1.0)`;
+  const prompt = `This is a page from a PDF report. Find the bounding box of the main chart, graph, or table.
+Reply with ONLY a JSON object, no other text:
+- If chart/graph/table found: {"x": 0.05, "y": 0.30, "w": 0.90, "h": 0.45}
+- If no chart found: {"found": false}
+x,y = top-left corner as proportion of image (0.0 to 1.0), w,h = width/height as proportion.`;
 
-  // gemini-2.0-flash 우선 (thinking 없이 빠름), 실패 시 2.5-flash 폴백
-  const models = [
-    { model: 'gemini-2.0-flash', useThinking: false },
-    { model: 'gemini-2.5-flash', useThinking: true },
-  ];
+  const requestBody = {
+    contents: [{
+      parts: [
+        { inline_data: { mime_type: 'image/jpeg', data: imageBuffer.toString('base64') } },
+        { text: prompt },
+      ],
+    }],
+    generationConfig: { maxOutputTokens: 512, temperature: 0 },
+    thinkingConfig: { thinkingBudget: 1024 },
+  };
 
-  for (const { model, useThinking } of models) {
-    try {
-      const requestBody = {
-        contents: [{
-          parts: [
-            { inline_data: { mime_type: 'image/jpeg', data: imageBuffer.toString('base64') } },
-            { text: prompt },
-          ],
-        }],
-        generationConfig: { maxOutputTokens: 512, temperature: 0 },
-        ...(useThinking && { thinkingConfig: { thinkingBudget: 0 } }),
-      };
-
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(30000),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        console.error(`[bbox] ${model} 실패: ${res.status} ${JSON.stringify(json).slice(0, 80)}`);
-        continue;
-      }
-      const text = (json.candidates?.[0]?.content?.parts || [])
-        .map(p => p.text || '').join('').trim();
-      console.log(`[bbox] ${model} 응답: ${text.slice(0, 120)}`);
-
-      const match = text.match(/\{[^{}]*\}/);
-      if (!match) continue;
-      const parsed = JSON.parse(match[0]);
-      if (parsed.found === false) return null;
-      if (typeof parsed.x === 'number' && typeof parsed.y === 'number' &&
-          typeof parsed.w === 'number' && typeof parsed.h === 'number' &&
-          parsed.w > 0.05 && parsed.h > 0.05) {
-        return parsed;
-      }
-    } catch (e) {
-      console.error(`[bbox] ${model} 오류: ${e.message}`);
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(40000),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      console.error(`[bbox] 실패: ${res.status} ${JSON.stringify(json).slice(0, 100)}`);
+      return null;
     }
+    // thinking 파트 제외하고 text 파트만 추출
+    const text = (json.candidates?.[0]?.content?.parts || [])
+      .filter(p => !p.thought)
+      .map(p => p.text || '').join('').trim();
+    console.log(`[bbox] 응답: ${text.slice(0, 150)}`);
+
+    const match = text.match(/\{[^{}]+\}/);
+    if (!match) { console.warn('[bbox] JSON 없음'); return null; }
+    const parsed = JSON.parse(match[0]);
+    if (parsed.found === false) { console.log('[bbox] 차트 없음'); return null; }
+    if (typeof parsed.x === 'number' && typeof parsed.y === 'number' &&
+        typeof parsed.w === 'number' && typeof parsed.h === 'number' &&
+        parsed.w > 0.05 && parsed.h > 0.05) {
+      console.log(`[bbox] 감지 성공: x=${parsed.x.toFixed(2)} y=${parsed.y.toFixed(2)} w=${parsed.w.toFixed(2)} h=${parsed.h.toFixed(2)}`);
+      return parsed;
+    }
+    console.warn('[bbox] 좌표 형식 오류:', parsed);
+    return null;
+  } catch (e) {
+    console.error(`[bbox] 오류: ${e.message}`);
+    return null;
   }
-  return null;
 }
 
 // sharp로 이미지 크롭 (바운딩 박스 기준)
