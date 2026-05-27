@@ -192,11 +192,10 @@ async function summarizePdf(pdfBuffer, subject) {
 async function detectChartBbox(imageBuffer) {
   if (!process.env.GEMINI_API_KEY) return null;
 
-  const prompt = `This is a page from a PDF report. Find the bounding box of the main chart, graph, or table.
-Reply with ONLY a JSON object, no other text:
-- If chart/graph/table found: {"x": 0.05, "y": 0.30, "w": 0.90, "h": 0.45}
-- If no chart found: {"found": false}
-x,y = top-left corner as proportion of image (0.0 to 1.0), w,h = width/height as proportion.`;
+  const prompt = `Find the bounding box of the main chart, graph, or table in this PDF report page.
+x, y = top-left corner as proportion of image (0.0 to 1.0).
+w, h = width and height as proportion (0.0 to 1.0).
+If no chart or graph exists, set found to false and x,y,w,h to 0.`;
 
   const requestBody = {
     contents: [{
@@ -205,8 +204,22 @@ x,y = top-left corner as proportion of image (0.0 to 1.0), w,h = width/height as
         { text: prompt },
       ],
     }],
-    generationConfig: { maxOutputTokens: 1024, temperature: 0 },
-    // gemini-1.5-flash: non-thinking model, no token budget issues
+    generationConfig: {
+      maxOutputTokens: 1024,
+      temperature: 0,
+      responseMimeType: 'application/json',   // JSON만 출력 강제
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          found: { type: 'BOOLEAN' },
+          x: { type: 'NUMBER' },
+          y: { type: 'NUMBER' },
+          w: { type: 'NUMBER' },
+          h: { type: 'NUMBER' },
+        },
+        required: ['found'],
+      },
+    },
   };
 
   try {
