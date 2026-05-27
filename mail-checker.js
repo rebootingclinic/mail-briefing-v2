@@ -206,7 +206,6 @@ x,y = top-left corner as proportion of image (0.0 to 1.0), w,h = width/height as
       ],
     }],
     generationConfig: { maxOutputTokens: 512, temperature: 0 },
-    thinkingConfig: { thinkingBudget: 1024 },
   };
 
   try {
