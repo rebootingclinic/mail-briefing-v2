@@ -287,7 +287,7 @@ async function cropImage(imgBuf, bbox) {
   try {
     const sharp = require('sharp');
     const meta = await sharp(imgBuf).metadata();
-    const PAD = 0.08; // 상하좌우 8% 여백 추가
+    const PAD = 0.15; // 상하좌우 15% 여백 추가
     const left   = Math.max(0, Math.round((bbox.x - PAD) * meta.width));
     const top    = Math.max(0, Math.round((bbox.y - PAD) * meta.height));
     const right  = Math.min(meta.width,  Math.round((bbox.x + bbox.w + PAD) * meta.width));
