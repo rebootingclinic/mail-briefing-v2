@@ -16,9 +16,11 @@ function injectPageImages(html, briefingId, chartPages) {
   const sortedPages = [...chartPages].map(Number).sort((a, b) => a - b);
   let idx = 0;
 
-  // <li> 항목마다 차트 이미지를 하나씩 순서대로 붙임
-  return cleanHtml.replace(/<li>([\s\S]*?)<\/li>/g, (match) => {
-    if (idx < sortedPages.length) {
+  // <li> 또는 <strong>으로 시작하는 <p> 뒤에 차트 이미지 순서대로 삽입
+  // (Gemini가 - 리스트로 쓰면 <li>, bold 단락으로 쓰면 <p><strong> 형태)
+  return cleanHtml.replace(/<(li|p)>([\s\S]*?)<\/(li|p)>/g, (match, tag, content) => {
+    const shouldInject = tag === 'li' || content.trimStart().startsWith('<strong>');
+    if (shouldInject && idx < sortedPages.length) {
       const pageNum = sortedPages[idx++];
       const img = `<div class="inline-chart"><img src="/briefing/${briefingId}/page/${pageNum}" loading="lazy" onclick="this.classList.toggle('expanded')" /><span class="inline-chart-label">p.${pageNum}</span></div>`;
       return match + img;
