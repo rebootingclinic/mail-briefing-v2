@@ -192,18 +192,13 @@ async function summarizePdf(pdfBuffer, subject) {
 async function detectChartBbox(imageBuffer) {
   if (!process.env.GEMINI_API_KEY) return null;
 
-  const prompt = `Find the complete bounding box of the main chart, graph, or table in this PDF report page.
-The bounding box must include everything that belongs to the chart as one unit:
-- Chart title
-- The chart/graph/table itself (bars, lines, cells, etc.)
-- Axis labels and tick marks
-- Legend
-- Footnotes or source notes directly below the chart
-
-Do NOT include unrelated page headers, page footers, or separate text paragraphs.
+  const prompt = `Find the bounding box that covers ALL charts, graphs, tables, and infographics on this PDF report page as one single rectangle.
+If there are multiple charts or visual elements, the bounding box must contain all of them together.
+Include: chart titles, all visual data elements, axis labels, legends, footnotes/source notes attached to charts.
+Exclude: page header at the top, page footer/page number at the bottom, and body text paragraphs unrelated to any chart.
 x, y = top-left corner as proportion of image (0.0 to 1.0).
 w, h = width and height as proportion (0.0 to 1.0).
-If no chart or graph exists, set found to false.`;
+If there are no charts or graphs at all, set found to false.`;
 
   const requestBody = {
     contents: [{
