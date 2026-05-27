@@ -192,13 +192,24 @@ async function summarizePdf(pdfBuffer, subject) {
 async function detectChartBbox(imageBuffer) {
   if (!process.env.GEMINI_API_KEY) return null;
 
-  const prompt = `Find the bounding box that covers ALL charts, graphs, tables, and infographics on this PDF report page as one single rectangle.
-If there are multiple charts or visual elements, the bounding box must contain all of them together.
-Include: chart titles, all visual data elements, axis labels, legends, footnotes/source notes attached to charts.
-Exclude: page header at the top, page footer/page number at the bottom, and body text paragraphs unrelated to any chart.
-x, y = top-left corner as proportion of image (0.0 to 1.0).
-w, h = width and height as proportion (0.0 to 1.0).
-If there are no charts or graphs at all, set found to false.`;
+  const prompt = `Find the bounding box that tightly covers ALL charts, graphs, tables, and infographics on this PDF report page as one single rectangle.
+If there are multiple visual elements, the bounding box must contain all of them together.
+
+INCLUDE inside the box:
+- Chart/table titles that are directly above or part of the visual
+- All visual data: bars, lines, pie slices, table cells, axis lines, tick marks
+- Axis labels and scale numbers
+- Legends and color keys
+- Footnotes, asterisks (*), and source citations (e.g. "출처:", "Source:") that appear directly below the chart
+
+STRICTLY EXCLUDE from the box:
+- The page header band at the very top of the page (logo, report title, date strip)
+- The page number or footer at the very bottom of the page
+- Body text paragraphs or bullet points that are clearly separated from any chart by a visible gap
+
+x, y = top-left corner as proportion of image width/height (0.0 to 1.0).
+w, h = width and height as proportion of image width/height (0.0 to 1.0).
+If there are no charts, graphs, or tables at all on this page, set found to false.`;
 
   const requestBody = {
     contents: [{
@@ -290,11 +301,13 @@ async function cropImage(imgBuf, bbox) {
   try {
     const sharp = require('sharp');
     const meta = await sharp(imgBuf).metadata();
-    const PAD = 0.02; // 최소 여백 (AI가 전체 차트 블록을 인식하므로 크게 불필요)
-    const left   = Math.max(0, Math.round((bbox.x - PAD) * meta.width));
-    const top    = Math.max(0, Math.round((bbox.y - PAD) * meta.height));
-    const right  = Math.min(meta.width,  Math.round((bbox.x + bbox.w + PAD) * meta.width));
-    const bottom = Math.min(meta.height, Math.round((bbox.y + bbox.h + PAD) * meta.height));
+    const PAD_X      = 0.02; // 좌우 여백
+    const PAD_TOP    = 0.02; // 상단 여백
+    const PAD_BOTTOM = 0.05; // 하단 여백 (그래프 하단 잘림 방지)
+    const left   = Math.max(0, Math.round((bbox.x - PAD_X)           * meta.width));
+    const top    = Math.max(0, Math.round((bbox.y - PAD_TOP)         * meta.height));
+    const right  = Math.min(meta.width,  Math.round((bbox.x + bbox.w + PAD_X)      * meta.width));
+    const bottom = Math.min(meta.height, Math.round((bbox.y + bbox.h + PAD_BOTTOM) * meta.height));
     const width  = right - left;
     const height = bottom - top;
 

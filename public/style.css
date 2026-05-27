@@ -37,7 +37,7 @@ main { flex: 1; max-width: 900px; width: 100%; margin: 32px auto; padding: 0 20p
 .detail-content p { font-size: .95rem; line-height: 1.85; color: #333; margin-bottom: 10px; }
 
 /* AI 요약 스타일 */
-.summary-content h2 { font-size: 1.15rem; font-weight: 800; color: #1a56db; margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 3px solid #d0e0ff; letter-spacing: -.01em; }
+.summary-content h2 { font-size: 1.3rem; font-weight: 900; color: #1a56db; margin: 44px 0 16px; padding-bottom: 10px; border-bottom: 3px solid #d0e0ff; letter-spacing: -.02em; }
 .summary-content h2:first-child { margin-top: 0; }
 .summary-content ul, .summary-content ol { padding-left: 24px; margin-bottom: 20px; }
 .summary-content ol { list-style: decimal; }
