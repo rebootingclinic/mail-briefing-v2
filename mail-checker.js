@@ -192,10 +192,18 @@ async function summarizePdf(pdfBuffer, subject) {
 async function detectChartBbox(imageBuffer) {
   if (!process.env.GEMINI_API_KEY) return null;
 
-  const prompt = `Find the bounding box of the main chart, graph, or table in this PDF report page.
+  const prompt = `Find the complete bounding box of the main chart, graph, or table in this PDF report page.
+The bounding box must include everything that belongs to the chart as one unit:
+- Chart title
+- The chart/graph/table itself (bars, lines, cells, etc.)
+- Axis labels and tick marks
+- Legend
+- Footnotes or source notes directly below the chart
+
+Do NOT include unrelated page headers, page footers, or separate text paragraphs.
 x, y = top-left corner as proportion of image (0.0 to 1.0).
 w, h = width and height as proportion (0.0 to 1.0).
-If no chart or graph exists, set found to false and x,y,w,h to 0.`;
+If no chart or graph exists, set found to false.`;
 
   const requestBody = {
     contents: [{
@@ -287,7 +295,7 @@ async function cropImage(imgBuf, bbox) {
   try {
     const sharp = require('sharp');
     const meta = await sharp(imgBuf).metadata();
-    const PAD = 0.15; // 상하좌우 15% 여백 추가
+    const PAD = 0.02; // 최소 여백 (AI가 전체 차트 블록을 인식하므로 크게 불필요)
     const left   = Math.max(0, Math.round((bbox.x - PAD) * meta.width));
     const top    = Math.max(0, Math.round((bbox.y - PAD) * meta.height));
     const right  = Math.min(meta.width,  Math.round((bbox.x + bbox.w + PAD) * meta.width));
