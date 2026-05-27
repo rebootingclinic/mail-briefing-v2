@@ -39,5 +39,48 @@
 
 
   <footer><p>1시간마다 자동 확인 · 새 브리핑 도착 시 텔레그램 알림</p></footer>
+
+  <!-- 이미지 라이트박스 -->
+  <div id="lightbox" class="lightbox" role="dialog" aria-modal="true">
+    <button class="lightbox-close" id="lightbox-close" aria-label="닫기">✕</button>
+    <div class="lightbox-bg" id="lightbox-bg"></div>
+    <img class="lightbox-img" id="lightbox-img" src="" alt="차트 확대" />
+  </div>
+
+  <script>
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    const lightboxClose = document.getElementById('lightbox-close');
+    const lightboxBg = document.getElementById('lightbox-bg');
+
+    function openLightbox(src) {
+      lightboxImg.src = src;
+      lightbox.classList.add('active');
+      document.body.style.overflow = 'hidden';
+      history.pushState({ lightbox: true }, '');
+    }
+
+    function closeLightbox() {
+      lightbox.classList.remove('active');
+      document.body.style.overflow = '';
+      lightboxImg.src = '';
+    }
+
+    // 인라인 차트 이미지 클릭 → 라이트박스
+    document.querySelectorAll('.inline-chart img').forEach(img => {
+      img.style.cursor = 'zoom-in';
+      img.removeAttribute('onclick');
+      img.addEventListener('click', () => openLightbox(img.src));
+    });
+
+    // 닫기 버튼 / 배경 클릭
+    lightboxClose.addEventListener('click', () => { history.back(); });
+    lightboxBg.addEventListener('click', () => { history.back(); });
+
+    // 뒤로가기 → 라이트박스 닫기
+    window.addEventListener('popstate', (e) => {
+      if (lightbox.classList.contains('active')) closeLightbox();
+    });
+  </script>
 </body>
 </html>
