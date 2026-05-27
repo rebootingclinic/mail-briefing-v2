@@ -225,12 +225,23 @@ x,y = top-left corner as proportion of image (0.0 to 1.0), w,h = width/height as
     const raw = (json.candidates?.[0]?.content?.parts || [])
       .filter(p => !p.thought)
       .map(p => p.text || '').join('').trim();
+    const finishReason = json.candidates?.[0]?.finishReason;
     const text = raw.replace(/```(?:json)?/g, '').trim();
-    console.log(`[bbox] 응답: ${text.slice(0, 200)}`);
+    console.log(`[bbox] 응답(${finishReason}): ${text}`);  // 전체 응답 출력
 
-    const match = text.match(/\{[\s\S]*?\}/);
-    if (!match) { console.warn('[bbox] JSON 없음'); return null; }
-    const parsed = JSON.parse(match[0]);
+    // JSON 파싱 시도 (직접 → 정규식 순서)
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      const match = text.match(/\{[\s\S]*\}/);  // greedy: 가장 큰 {...} 추출
+      if (match) {
+        try { parsed = JSON.parse(match[0]); } catch (e2) {
+          console.warn('[bbox] JSON 파싱 실패:', match[0].slice(0, 100));
+        }
+      }
+    }
+    if (!parsed) { console.warn('[bbox] JSON 없음'); return null; }
     if (parsed.found === false) { console.log('[bbox] 차트 없음'); return null; }
     if (typeof parsed.x === 'number' && typeof parsed.y === 'number' &&
         typeof parsed.w === 'number' && typeof parsed.h === 'number' &&
@@ -238,7 +249,7 @@ x,y = top-left corner as proportion of image (0.0 to 1.0), w,h = width/height as
       console.log(`[bbox] 감지 성공: x=${parsed.x.toFixed(2)} y=${parsed.y.toFixed(2)} w=${parsed.w.toFixed(2)} h=${parsed.h.toFixed(2)}`);
       return parsed;
     }
-    console.warn('[bbox] 좌표 형식 오류:', parsed);
+    console.warn('[bbox] 좌표 형식 오류:', JSON.stringify(parsed));
     return null;
   } catch (e) {
     console.error(`[bbox] 오류: ${e.message}`);
