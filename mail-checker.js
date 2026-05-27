@@ -205,7 +205,7 @@ If no chart or graph exists, set found to false and x,y,w,h to 0.`;
       ],
     }],
     generationConfig: {
-      maxOutputTokens: 1024,
+      maxOutputTokens: 8192,   // 2.5-flash: thinking 토큰 포함 여유있게
       temperature: 0,
       responseMimeType: 'application/json',   // JSON만 출력 강제
       responseSchema: {
@@ -223,7 +223,7 @@ If no chart or graph exists, set found to false and x,y,w,h to 0.`;
   };
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
