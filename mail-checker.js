@@ -471,6 +471,10 @@ async function checkMail() {
     },
     logger: false,
   });
+  // Gemini 처리 중 IMAP 연결이 끊겨도 서버가 죽지 않도록
+  client.on('error', (err) => {
+    console.warn('[IMAP] 연결 오류 (무시):', err.message);
+  });
 
   let newCount = 0;
 
