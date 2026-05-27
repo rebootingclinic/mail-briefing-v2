@@ -205,11 +205,12 @@ x,y = top-left corner as proportion of image (0.0 to 1.0), w,h = width/height as
         { text: prompt },
       ],
     }],
-    generationConfig: { maxOutputTokens: 512, temperature: 0 },
+    generationConfig: { maxOutputTokens: 1024, temperature: 0 },
+    // gemini-1.5-flash: non-thinking model, no token budget issues
   };
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
