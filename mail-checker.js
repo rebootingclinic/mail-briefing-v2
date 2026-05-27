@@ -221,13 +221,14 @@ x,y = top-left corner as proportion of image (0.0 to 1.0), w,h = width/height as
       console.error(`[bbox] 실패: ${res.status} ${JSON.stringify(json).slice(0, 100)}`);
       return null;
     }
-    // thinking 파트 제외하고 text 파트만 추출
-    const text = (json.candidates?.[0]?.content?.parts || [])
+    // thinking 파트 제외하고 text 파트만 추출, 마크다운 코드블록 제거
+    const raw = (json.candidates?.[0]?.content?.parts || [])
       .filter(p => !p.thought)
       .map(p => p.text || '').join('').trim();
-    console.log(`[bbox] 응답: ${text.slice(0, 150)}`);
+    const text = raw.replace(/```(?:json)?/g, '').trim();
+    console.log(`[bbox] 응답: ${text.slice(0, 200)}`);
 
-    const match = text.match(/\{[^{}]+\}/);
+    const match = text.match(/\{[\s\S]*?\}/);
     if (!match) { console.warn('[bbox] JSON 없음'); return null; }
     const parsed = JSON.parse(match[0]);
     if (parsed.found === false) { console.log('[bbox] 차트 없음'); return null; }
