@@ -165,6 +165,18 @@ app.post('/retry-images/:id', async (req, res) => {
   }
 });
 
+// 브리핑 개별 삭제
+app.post('/briefing/:id/delete', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await db.execute({ sql: 'DELETE FROM briefing_pages WHERE briefing_id = ?', args: [id] });
+    await db.execute({ sql: 'DELETE FROM briefings WHERE id = ?', args: [id] });
+    res.redirect('/?deleted=1');
+  } catch (e) {
+    res.status(500).send(`❌ 삭제 실패: ${e.message}`);
+  }
+});
+
 // 수동 확인 (즉시 응답 후 백그라운드 처리)
 app.post('/check', (req, res) => {
   res.redirect('/?checked=1');

@@ -27,6 +27,9 @@
         <% } else if (briefing.pdf_url) { %>
           <a href="<%= briefing.pdf_url %>" target="_blank" class="badge badge-link">🔗 원문 보기</a>
         <% } %>
+        <form method="POST" action="/briefing/<%= briefing.id %>/delete" onsubmit="return confirm('이 브리핑을 삭제할까요?');" style="margin-left:auto;">
+          <button type="submit" class="btn-delete">🗑️ 삭제</button>
+        </form>
       </div>
       <h2 class="detail-title"><%= briefing.subject %></h2>
       <div class="divider"></div>

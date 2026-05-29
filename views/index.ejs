@@ -20,6 +20,9 @@
   </header>
 
   <main>
+    <% if (query.deleted) { %>
+      <div class="toast">🗑️ 브리핑이 삭제됐어요.</div>
+    <% } %>
     <% if (query.checked) { %>
       <% if (briefings.length === 0) { %>
         <div class="toast toast-processing">

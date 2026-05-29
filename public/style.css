@@ -32,6 +32,8 @@ main { flex: 1; max-width: 900px; width: 100%; margin: 32px auto; padding: 0 20p
 .badge { background: #e8f0fe; color: #1a56db; padding: 5px 12px; border-radius: 20px; font-size: .82rem; font-weight: 600; text-decoration: none; }
 .badge-link { background: #fff3e0; color: #e65100; }
 .badge-link:hover { background: #ffe0b2; }
+.btn-delete { background: none; border: 1px solid #f4c0c0; color: #c0392b; padding: 5px 14px; border-radius: 20px; font-size: .82rem; font-weight: 600; cursor: pointer; transition: background .2s; }
+.btn-delete:hover { background: #fdecea; }
 .detail-title { font-size: 1.4rem; font-weight: 700; color: #1a1a2e; line-height: 1.5; margin-bottom: 20px; }
 .divider { height: 1px; background: #e8ecf4; margin-bottom: 24px; }
 .detail-content p { font-size: .95rem; line-height: 1.85; color: #333; margin-bottom: 10px; }
