@@ -3,11 +3,16 @@ const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { execFile } = require('child_process');
+const crypto = require('crypto');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { db } = require('./db');
 const { sendTelegram } = require('./telegram');
+
+function hashPdf(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
 
 const SENDER = 'ch-aide@aidepartners.com';
 const SITE_URL = process.env.SITE_URL || 'https://mail-briefing-v2-production.up.railway.app';
@@ -530,6 +535,16 @@ async function checkMail() {
           const rawName = pdfUrl.split('/').pop();
           const safeName = decodeURIComponent(rawName).replace(/[\\/:*?"<>|]/g, '_');
 
+          // PDF URL 중복 체크
+          const urlDup = await db.execute({
+            sql: 'SELECT id, subject FROM briefings WHERE pdf_url = ?',
+            args: [pdfUrl],
+          });
+          if (urlDup.rows.length > 0) {
+            console.log(`[스킵] 동일 PDF URL 이미 처리됨 — "${urlDup.rows[0].subject}" (id=${urlDup.rows[0].id})`);
+            continue;
+          }
+
           // PDF 다운로드
           let pdfBuffer;
           try {
@@ -543,14 +558,25 @@ async function checkMail() {
             continue;
           }
 
+          // PDF 내용 해시 중복 체크 (URL이 달라도 같은 파일이면 스킵)
+          const pdfHash = hashPdf(pdfBuffer);
+          const hashDup = await db.execute({
+            sql: 'SELECT id, subject FROM briefings WHERE pdf_hash = ?',
+            args: [pdfHash],
+          });
+          if (hashDup.rows.length > 0) {
+            console.log(`[스킵] 동일 PDF 내용 이미 처리됨 — "${hashDup.rows[0].subject}" (id=${hashDup.rows[0].id})`);
+            continue;
+          }
+
           // Gemini로 요약 (summary + chartPages 반환)
           const { summary, chartPages } = await summarizePdf(pdfBuffer, subject);
           console.log(`[요약] 완료 — ${subject}`);
 
           const result = await db.execute({
-            sql: `INSERT OR IGNORE INTO briefings (uid, subject, sender, mail_date, pdf_filename, pdf_content, pdf_url)
-                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            args: [uid, subject, SENDER, mailDate, safeName, summary, pdfUrl],
+            sql: `INSERT OR IGNORE INTO briefings (uid, subject, sender, mail_date, pdf_filename, pdf_content, pdf_url, pdf_hash)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [uid, subject, SENDER, mailDate, safeName, summary, pdfUrl, pdfHash],
           });
 
           const briefingId = result.lastInsertRowid;

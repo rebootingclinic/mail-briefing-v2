@@ -32,6 +32,7 @@ async function initDb() {
   for (const col of [
     'ALTER TABLE briefings ADD COLUMN pdf_url TEXT',
     'ALTER TABLE briefings ADD COLUMN chart_pages TEXT',
+    'ALTER TABLE briefings ADD COLUMN pdf_hash TEXT',
   ]) {
     try { await db.execute(col); } catch (e) { /* 이미 존재하면 무시 */ }
   }
